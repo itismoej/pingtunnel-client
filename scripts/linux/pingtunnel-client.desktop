@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Pingtunnel Client
+Exec=pingtunnel-client
+Icon=pingtunnel-client
+Terminal=false
+Categories=Network;
+StartupWMClass=app
