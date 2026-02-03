@@ -26,14 +26,22 @@ echo "Building Android APKs (release)..."
 mkdir -p "${DIST_DIR}"
 APK_DIR="${APP_DIR}/build/app/outputs/flutter-apk"
 APK_COUNT=0
-for apk in "${APK_DIR}"/app-*-release.apk; do
+copy_apk() {
+  local apk="$1"
   if [[ -f "${apk}" ]]; then
+    local base
+    local out
     base="$(basename "${apk}")"
     out="${DIST_DIR}/pingtunnel-client-${VERSION_TAG}-${base}"
     cp -f "${apk}" "${out}"
     echo "APK: ${out}"
     APK_COUNT=$((APK_COUNT + 1))
   fi
+}
+
+copy_apk "${APK_DIR}/app-release.apk"
+for apk in "${APK_DIR}"/app-*-release.apk; do
+  copy_apk "${apk}"
 done
 if [[ "${APK_COUNT}" -eq 0 ]]; then
   echo "No APKs found in ${APK_DIR}" >&2
