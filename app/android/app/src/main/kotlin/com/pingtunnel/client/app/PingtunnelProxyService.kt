@@ -36,10 +36,17 @@ class PingtunnelProxyService : Service() {
         }
 
         val config = TunnelConfig.fromIntent(intent)
+        val disconnectIntent = ServiceNotifications.createServiceActionIntent(
+            this,
+            PingtunnelProxyService::class.java,
+            Constants.ACTION_STOP,
+            1001
+        )
         val notification = ServiceNotifications.createForegroundNotification(
             this,
             "Pingtunnel Proxy",
-            "Connected to ${config.serverHost}"
+            "Connected to ${config.serverHost}",
+            disconnectIntent
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)

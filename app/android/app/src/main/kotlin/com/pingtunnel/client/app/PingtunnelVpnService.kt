@@ -41,10 +41,17 @@ class PingtunnelVpnService : VpnService() {
         }
 
         val config = TunnelConfig.fromIntent(intent)
+        val disconnectIntent = ServiceNotifications.createServiceActionIntent(
+            this,
+            PingtunnelVpnService::class.java,
+            Constants.ACTION_STOP,
+            2001
+        )
         val notification = ServiceNotifications.createForegroundNotification(
             this,
             "Pingtunnel VPN",
-            "Connected to ${config.serverHost}"
+            "Connected to ${config.serverHost}",
+            disconnectIntent
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
