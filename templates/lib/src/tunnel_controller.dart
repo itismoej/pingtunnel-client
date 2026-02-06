@@ -58,21 +58,22 @@ class TunnelController {
     logBuffer.clear();
 
     try {
+      final runtimeConfig = await _resolveServerHost(config);
       if (Platform.isAndroid) {
-        if (config.mode == TunnelMode.vpn) {
+        if (runtimeConfig.mode == TunnelMode.vpn) {
           final ok = await _androidRunner.prepareVpn();
           if (!ok) {
             throw StateError('VPN permission not granted');
           }
-          await _androidRunner.startVpn(config);
+          await _androidRunner.startVpn(runtimeConfig);
         } else {
-          await _androidRunner.startProxy(config);
+          await _androidRunner.startProxy(runtimeConfig);
         }
       } else {
-        if (config.mode == TunnelMode.proxy) {
-          await _desktopRunner.startProxy(config);
+        if (runtimeConfig.mode == TunnelMode.proxy) {
+          await _desktopRunner.startProxy(runtimeConfig);
         } else {
-          await _desktopRunner.startVpn(config);
+          await _desktopRunner.startVpn(runtimeConfig);
         }
       }
 
@@ -91,5 +92,41 @@ class TunnelController {
       await _desktopRunner.stop();
     }
     status = TunnelStatus.disconnected;
+  }
+
+  Future<TunnelConfig> _resolveServerHost(TunnelConfig config) async {
+    final host = config.serverHost.trim();
+    if (host.isEmpty) {
+      return config;
+    }
+    if (InternetAddress.tryParse(host) != null) {
+      return config;
+    }
+
+    try {
+      final resolved = await InternetAddress.lookup(host);
+      if (resolved.isEmpty) {
+        return config;
+      }
+
+      InternetAddress? ipv4;
+      for (final address in resolved) {
+        if (address.type == InternetAddressType.IPv4) {
+          ipv4 = address;
+          break;
+        }
+      }
+      if (ipv4 == null) {
+        logBuffer.add('[dns] No IPv4 address for $host, using hostname');
+        return config;
+      }
+
+      final resolvedHost = ipv4.address;
+      logBuffer.add('[dns] Resolved $host -> $resolvedHost');
+      return config.copyWith(serverHost: resolvedHost);
+    } catch (err) {
+      logBuffer.add('[dns] Host lookup failed for $host: $err');
+      return config;
+    }
   }
 }
