@@ -94,6 +94,18 @@ class TunnelController {
     status = TunnelStatus.disconnected;
   }
 
+  Future<bool> isAndroidRunning() async {
+    if (!Platform.isAndroid) {
+      return false;
+    }
+    return _androidRunner.isRunning();
+  }
+
+  void markDisconnectedExternally() {
+    status = TunnelStatus.disconnected;
+    lastError = null;
+  }
+
   Future<TunnelConfig> _resolveServerHost(TunnelConfig config) async {
     final host = config.serverHost.trim();
     if (host.isEmpty) {

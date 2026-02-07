@@ -43,6 +43,9 @@ class MainActivity : FlutterActivity() {
                         stopServices()
                         result.success(true)
                     }
+                    "isRunning" -> {
+                        result.success(ServiceState.isAnyRunning())
+                    }
                     else -> result.notImplemented()
                 }
             }

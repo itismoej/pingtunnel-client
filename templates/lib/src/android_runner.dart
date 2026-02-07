@@ -21,4 +21,9 @@ class AndroidRunner {
   Future<void> stop() async {
     await _channel.invokeMethod('stop');
   }
+
+  Future<bool> isRunning() async {
+    final result = await _channel.invokeMethod<bool>('isRunning');
+    return result ?? false;
+  }
 }

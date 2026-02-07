@@ -18,6 +18,7 @@ class PingtunnelProxyService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
+            ServiceState.proxyRunning = false
             stopSelf()
             return START_NOT_STICKY
         }
@@ -26,6 +27,7 @@ class PingtunnelProxyService : Service() {
         if (action == Constants.ACTION_STOP) {
             ProcessUtils.stopProcess(pingtunnelProcess)
             pingtunnelProcess = null
+            ServiceState.proxyRunning = false
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
             } else {
@@ -56,8 +58,11 @@ class PingtunnelProxyService : Service() {
 
         try {
             pingtunnelProcess = startPingtunnel(config)
+            ServiceState.proxyRunning = true
+            ServiceState.vpnRunning = false
         } catch (e: Exception) {
             Log.e("PingtunnelProxy", "Failed to start", e)
+            ServiceState.proxyRunning = false
             stopSelf()
         }
 
@@ -67,6 +72,7 @@ class PingtunnelProxyService : Service() {
     override fun onDestroy() {
         ProcessUtils.stopProcess(pingtunnelProcess)
         pingtunnelProcess = null
+        ServiceState.proxyRunning = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {

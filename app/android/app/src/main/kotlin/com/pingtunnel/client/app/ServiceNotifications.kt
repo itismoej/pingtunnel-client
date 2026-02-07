@@ -22,7 +22,7 @@ object ServiceNotifications {
         ensureChannel(context)
         val openAppIntent = createOpenAppIntent(context)
         return NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_ping)
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(openAppIntent)

@@ -24,6 +24,7 @@ class PingtunnelVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
+            ServiceState.vpnRunning = false
             stopSelf()
             return START_NOT_STICKY
         }
@@ -31,6 +32,7 @@ class PingtunnelVpnService : VpnService() {
         val action = intent.action
         if (action == Constants.ACTION_STOP) {
             stopVpn()
+            ServiceState.vpnRunning = false
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
             } else {
@@ -61,8 +63,11 @@ class PingtunnelVpnService : VpnService() {
 
         try {
             startVpn(config)
+            ServiceState.vpnRunning = true
+            ServiceState.proxyRunning = false
         } catch (e: Exception) {
             Log.e("PingtunnelVPN", "Failed to start", e)
+            ServiceState.vpnRunning = false
             stopSelf()
         }
 
@@ -71,6 +76,7 @@ class PingtunnelVpnService : VpnService() {
 
     override fun onDestroy() {
         stopVpn()
+        ServiceState.vpnRunning = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -81,6 +87,7 @@ class PingtunnelVpnService : VpnService() {
 
     override fun onRevoke() {
         stopVpn()
+        ServiceState.vpnRunning = false
         super.onRevoke()
     }
 
@@ -125,6 +132,7 @@ class PingtunnelVpnService : VpnService() {
         ProcessUtils.stopProcess(pingtunnelProcess)
         tun2socksProcess = null
         pingtunnelProcess = null
+        ServiceState.vpnRunning = false
 
         tunFd = null
 
