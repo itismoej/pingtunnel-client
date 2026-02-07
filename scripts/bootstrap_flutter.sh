@@ -81,6 +81,13 @@ deps_slice = lines[deps_idx + 1: deps_end]
 if not any(line.strip().startswith("shared_preferences:") for line in deps_slice):
     insert_at = deps_end if deps_end is not None else len(lines)
     lines.insert(insert_at, "  shared_preferences: ^2.2.3")
+    deps_end = deps_end + 1 if deps_end is not None else None
+
+deps_slice = lines[deps_idx + 1: deps_end]
+if not any(line.strip().startswith("window_manager:") for line in deps_slice):
+    insert_at = deps_end if deps_end is not None else len(lines)
+    lines.insert(insert_at, "  window_manager: ^0.5.1")
+    deps_end = deps_end + 1 if deps_end is not None else None
 
 flutter_idx = None
 for i, line in enumerate(lines):

@@ -52,7 +52,7 @@ Section: net
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: Pingtunnel Client <noreply@local>
-Depends: libc6, libgcc-s1, libstdc++6, libgtk-3-0, libglib2.0-0, policykit-1
+Depends: libc6, libgcc-s1, libstdc++6, libgtk-3-0, libglib2.0-0, policykit-1, libayatana-appindicator3-1 | libappindicator3-1
 Description: Pingtunnel Client
  A Flutter client for pingtunnel proxy/VPN.
 EOF

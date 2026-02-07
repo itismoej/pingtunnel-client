@@ -31,6 +31,7 @@ sudo rpm -i pingtunnel-client-*.rpm
 ## Requirements (Linux)
 
 - `policykit-1` is required for VPN mode (route/TUN changes).
+- For top-bar tray controls, install `libayatana-appindicator3-1` (or `libappindicator3-1`).
 - Your system may show an authorization prompt when enabling VPN mode.
 
 ## Usage
@@ -40,6 +41,7 @@ sudo rpm -i pingtunnel-client-*.rpm
 3. Select a connection.
 4. Tap **Connect** to start.
 5. Tap **Test Tunnel** to verify.
+6. On Linux, closing the window keeps the app running in the top bar menu.
 
 Sample URI:
 ```
