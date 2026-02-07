@@ -1,14 +1,20 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'src/config.dart';
 import 'src/tunnel_controller.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isLinux) {
+    await windowManager.ensureInitialized();
+  }
   runApp(const PingtunnelApp());
 }
 
@@ -52,6 +58,30 @@ class ConnectionEntry {
 
 typedef SaveConnection = void Function(ConnectionEntry entry, {bool showMessage});
 
+String buildConnectionUri(TunnelConfig config) {
+  final params = <String, String>{
+    'lport': config.localSocksPort.toString(),
+    'mode': config.mode == TunnelMode.vpn ? 'vpn' : 'proxy',
+  };
+  if (config.encryptMode == null && config.key != null) {
+    params['key'] = config.key.toString();
+  }
+  if (config.serverPort != null) {
+    params['port'] = config.serverPort.toString();
+  }
+  if (config.encryptMode != null && config.encryptMode!.isNotEmpty) {
+    params['encrypt'] = config.encryptMode!;
+    if (config.encryptKey != null && config.encryptKey!.isNotEmpty) {
+      params['encrypt_key'] = config.encryptKey!;
+    }
+  }
+  return Uri(
+    scheme: 'pingtunnel',
+    host: config.serverHost,
+    queryParameters: params,
+  ).toString();
+}
+
 class ConnectionListPage extends StatefulWidget {
   const ConnectionListPage({super.key});
 
@@ -59,9 +89,13 @@ class ConnectionListPage extends StatefulWidget {
   State<ConnectionListPage> createState() => _ConnectionListPageState();
 }
 
-class _ConnectionListPageState extends State<ConnectionListPage> {
+class _ConnectionListPageState extends State<ConnectionListPage>
+    with WindowListener {
   static const _prefsKeyConnections = 'connections';
   static const _prefsKeySelected = 'selected_connection';
+  static const MethodChannel _linuxTrayChannel = MethodChannel(
+    'pingtunnel_tray_linux',
+  );
 
   final TunnelController _controller = TunnelController();
   final List<ConnectionEntry> _entries = <ConnectionEntry>[];
@@ -72,6 +106,11 @@ class _ConnectionListPageState extends State<ConnectionListPage> {
   DateTime? _lastProbeAt;
   Timer? _uiTimer;
   bool _loading = true;
+  bool _linuxTrayReady = false;
+  bool _linuxExitRequested = false;
+  bool _syncingAndroidStatus = false;
+  int _androidSyncTick = 0;
+  int _androidNotRunningSamples = 0;
 
   @override
   void initState() {
@@ -80,14 +119,206 @@ class _ConnectionListPageState extends State<ConnectionListPage> {
       if (mounted) {
         setState(() {});
       }
+      if (_isAndroidDevice) {
+        _androidSyncTick = (_androidSyncTick + 1) % 2;
+        if (_androidSyncTick == 0) {
+          unawaited(_syncAndroidRuntimeState());
+        }
+      }
     });
+    _initLinuxTray();
     _loadConnections();
+    if (_isAndroidDevice) {
+      unawaited(_syncAndroidRuntimeState());
+    }
   }
 
   @override
   void dispose() {
     _uiTimer?.cancel();
+    if (_isLinuxDesktop) {
+      _linuxTrayChannel.setMethodCallHandler(null);
+      windowManager.removeListener(this);
+    }
     super.dispose();
+  }
+
+  bool get _isLinuxDesktop => Platform.isLinux;
+  bool get _isAndroidDevice => Platform.isAndroid;
+
+  Future<void> _initLinuxTray() async {
+    if (!_isLinuxDesktop) return;
+    windowManager.addListener(this);
+    try {
+      _linuxTrayChannel.setMethodCallHandler(_onLinuxTrayMethodCall);
+      await windowManager.setPreventClose(true);
+      _linuxTrayReady = true;
+      await _refreshLinuxTrayState();
+    } catch (_) {
+      _linuxTrayReady = false;
+    }
+  }
+
+  void _scheduleLinuxTrayRefresh() {
+    if (!_linuxTrayReady) return;
+    unawaited(_refreshLinuxTrayState());
+  }
+
+  Future<void> _refreshLinuxTrayState() async {
+    if (!_linuxTrayReady) return;
+
+    final active = _activeEntry();
+    final selected = _selectedEntry();
+    final target = active ?? selected;
+    final mode = target?.config.mode == TunnelMode.vpn
+        ? 'vpn'
+        : target?.config.mode == TunnelMode.proxy
+            ? 'proxy'
+            : 'none';
+
+    try {
+      await _linuxTrayChannel.invokeMethod<void>('updateState', <String, dynamic>{
+        'connected': _activeId != null,
+        'mode': mode,
+        'hasTarget': target != null,
+      });
+    } catch (_) {}
+  }
+
+  ConnectionEntry? _trayTargetEntry() {
+    return _activeEntry() ?? _selectedEntry() ?? (_entries.isNotEmpty ? _entries.first : null);
+  }
+
+  Future<void> _showWindowFromTray() async {
+    if (!_isLinuxDesktop) return;
+    await windowManager.show();
+    await windowManager.focus();
+  }
+
+  Future<void> _syncAndroidRuntimeState() async {
+    if (!_isAndroidDevice || _syncingAndroidStatus) return;
+    _syncingAndroidStatus = true;
+    try {
+      final running = await _controller.isAndroidRunning();
+      if (!mounted) return;
+      if (running) {
+        _androidNotRunningSamples = 0;
+        return;
+      }
+      _androidNotRunningSamples += 1;
+      if (_androidNotRunningSamples < 2) {
+        return;
+      }
+      if (
+          (_activeId != null ||
+              _controller.status == TunnelStatus.connected ||
+              _controller.status == TunnelStatus.connecting)) {
+        _controller.markDisconnectedExternally();
+        setState(() {
+          _activeId = null;
+        });
+      }
+    } catch (_) {
+    } finally {
+      _syncingAndroidStatus = false;
+    }
+  }
+
+  Future<void> _onLinuxTrayMethodCall(MethodCall call) async {
+    if (call.method != 'onTrayEvent') return;
+    final args = call.arguments;
+    var event = '';
+    if (args is Map) {
+      event = args['event']?.toString() ?? '';
+    }
+
+    switch (event) {
+      case 'connect':
+        await _connectSelected();
+        break;
+      case 'show':
+        await _showWindowFromTray();
+        break;
+      case 'disconnect':
+        await _disconnectActive(showMessage: false);
+        break;
+      case 'switch_proxy':
+        await _switchModeFromTray(TunnelMode.proxy);
+        break;
+      case 'switch_vpn':
+        await _switchModeFromTray(TunnelMode.vpn);
+        break;
+      case 'exit':
+        await _exitFromTray();
+        break;
+      default:
+        break;
+    }
+  }
+
+  Future<void> _switchModeFromTray(TunnelMode mode) async {
+    final target = _trayTargetEntry();
+    if (target == null) {
+      await _showWindowFromTray();
+      _showMessage('Add a connection first');
+      return;
+    }
+
+    final wasActive = _activeId == target.id;
+    final updatedConfig = target.config.copyWith(mode: mode);
+    final updated = ConnectionEntry(
+      uri: buildConnectionUri(updatedConfig),
+      config: updatedConfig,
+    );
+    _updateEntry(target, updated, showMessage: false);
+    _selectEntry(updated);
+
+    if (wasActive) {
+      try {
+        await _controller.stop();
+        await _controller.start(updated.config);
+        setState(() {
+          _activeId = updated.id;
+        });
+      } catch (err) {
+        setState(() {
+          _activeId = null;
+        });
+        _showMessage('Failed to switch mode: $err');
+        _scheduleLinuxTrayRefresh();
+        return;
+      }
+    }
+
+    _showMessage('Mode set to ${mode == TunnelMode.vpn ? "VPN" : "Proxy"}');
+    _scheduleLinuxTrayRefresh();
+  }
+
+  Future<void> _exitFromTray() async {
+    _linuxExitRequested = true;
+    try {
+      if (_activeId != null) {
+        await _controller.stop();
+      }
+    } catch (_) {}
+
+    if (_isLinuxDesktop) {
+      await windowManager.setPreventClose(false);
+      try {
+        await _linuxTrayChannel.invokeMethod<void>('exitNow');
+        return;
+      } catch (_) {}
+      await windowManager.close();
+    }
+  }
+
+  @override
+  void onWindowClose() async {
+    if (!_isLinuxDesktop || _linuxExitRequested) return;
+    final preventClose = await windowManager.isPreventClose();
+    if (preventClose) {
+      await windowManager.hide();
+    }
   }
 
   Future<void> _loadConnections() async {
@@ -113,6 +344,7 @@ class _ConnectionListPageState extends State<ConnectionListPage> {
       }
       _loading = false;
     });
+    _scheduleLinuxTrayRefresh();
   }
 
   Future<void> _persistConnections() async {
@@ -149,6 +381,7 @@ class _ConnectionListPageState extends State<ConnectionListPage> {
       _selectedId = entry.id;
     });
     _persistConnections();
+    _scheduleLinuxTrayRefresh();
   }
 
   Future<void> _addFromClipboard() async {
@@ -219,6 +452,7 @@ class _ConnectionListPageState extends State<ConnectionListPage> {
         }
       });
       _persistConnections();
+      _scheduleLinuxTrayRefresh();
       _showMessage('Connection added');
     } catch (err) {
       _showMessage('Invalid URI: $err');
@@ -241,6 +475,7 @@ class _ConnectionListPageState extends State<ConnectionListPage> {
             setState(() {
               _activeId = id;
             });
+            _scheduleLinuxTrayRefresh();
           },
           onSave: (updated, {showMessage = true}) =>
               _updateEntry(entry, updated, showMessage: showMessage),
@@ -282,6 +517,7 @@ class _ConnectionListPageState extends State<ConnectionListPage> {
       }
     });
     _persistConnections();
+    _scheduleLinuxTrayRefresh();
     if (showMessage) {
       _showMessage('Connection updated');
     }
@@ -301,20 +537,24 @@ class _ConnectionListPageState extends State<ConnectionListPage> {
       setState(() {
         _activeId = entry.id;
       });
+      _scheduleLinuxTrayRefresh();
     } catch (err) {
       _showMessage(err.toString());
     }
   }
 
-  Future<void> _disconnectActive() async {
+  Future<void> _disconnectActive({bool showMessage = true}) async {
     if (_activeId == null) {
-      _showMessage('Nothing is connected');
+      if (showMessage) {
+        _showMessage('Nothing is connected');
+      }
       return;
     }
     await _controller.stop();
     setState(() {
       _activeId = null;
     });
+    _scheduleLinuxTrayRefresh();
   }
 
   Future<void> _testSelected() async {
@@ -395,6 +635,7 @@ class _ConnectionListPageState extends State<ConnectionListPage> {
         _selectedId = _entries.isNotEmpty ? _entries.first.id : null;
       }
     });
+    _scheduleLinuxTrayRefresh();
   }
 
   @override
@@ -926,27 +1167,7 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
   }
 
   String _buildUri(TunnelConfig config) {
-    final params = <String, String>{
-      'lport': config.localSocksPort.toString(),
-      'mode': config.mode == TunnelMode.vpn ? 'vpn' : 'proxy',
-    };
-    if (config.encryptMode == null && config.key != null) {
-      params['key'] = config.key.toString();
-    }
-    if (config.serverPort != null) {
-      params['port'] = config.serverPort.toString();
-    }
-    if (config.encryptMode != null && config.encryptMode!.isNotEmpty) {
-      params['encrypt'] = config.encryptMode!;
-      if (config.encryptKey != null && config.encryptKey!.isNotEmpty) {
-        params['encrypt_key'] = config.encryptKey!;
-      }
-    }
-    return Uri(
-      scheme: 'pingtunnel',
-      host: config.serverHost,
-      queryParameters: params,
-    ).toString();
+    return buildConnectionUri(config);
   }
 
   Future<void> _saveEdits() async {
