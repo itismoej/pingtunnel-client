@@ -1,5 +1,5 @@
-name: app
-description: "A new Flutter project."
+name: "Pingtunnel Client"
+description: "Desktop and Android client for pingtunnel with easy Proxy/VPN switching."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.2.0+1
+version: 0.3.0+1
 
 environment:
   sdk: ^3.10.8
@@ -55,18 +55,6 @@ dev_dependencies:
 # The following section is specific to Flutter packages.
 flutter:
   assets:
-    - assets/binaries/pingtunnel/android-arm64/
-    - assets/binaries/pingtunnel/darwin-amd64/
-    - assets/binaries/pingtunnel/darwin-arm64/
-    - assets/binaries/pingtunnel/linux-amd64/
-    - assets/binaries/pingtunnel/windows-amd64/
-    - assets/binaries/pingtunnel/windows-arm64/
-    - assets/binaries/tun2socks/android-arm64/
-    - assets/binaries/tun2socks/darwin-amd64/
-    - assets/binaries/tun2socks/darwin-arm64/
-    - assets/binaries/tun2socks/linux-amd64/
-    - assets/binaries/tun2socks/windows-amd64/
-    - assets/binaries/tun2socks/windows-arm64/
     - assets/scripts/linux/
     - assets/scripts/macos/
     - assets/scripts/windows/

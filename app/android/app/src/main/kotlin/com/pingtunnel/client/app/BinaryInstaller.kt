@@ -9,27 +9,33 @@ import java.io.File
 class BinaryInstaller(private val context: Context) {
     fun ensureBinary(name: String): File {
         val nativePath = File(context.applicationInfo.nativeLibraryDir, "lib$name.so")
-        if (nativePath.exists() && nativePath.canExecute()) {
-            Log.i("Pingtunnel", "Using native lib binary: ${nativePath.absolutePath}")
-            return nativePath
+        if (nativePath.exists()) {
+            if (nativePath.canExecute()) {
+                Log.i("Pingtunnel", "Using native lib binary: ${nativePath.absolutePath}")
+                return nativePath
+            }
+            Log.w(
+                "Pingtunnel",
+                "Native binary is not executable; copying to app storage: ${nativePath.absolutePath}"
+            )
+
+            val arch = resolveArch()
+            val primaryDir = File(context.filesDir, "bin/$name/$arch")
+            val primary = installBinary(primaryDir, name, nativePath)
+            if (primary.canExecute()) {
+                return primary
+            }
+
+            val fallbackDir = File(context.codeCacheDir, "bin/$name/$arch")
+            val fallback = installBinary(fallbackDir, name, nativePath)
+            if (fallback.canExecute()) {
+                return fallback
+            }
+
+            throw IllegalStateException("Binary is not executable: ${primary.absolutePath}")
         }
 
-        val arch = resolveArch()
-        val ext = ""
-
-        val primaryDir = File(context.filesDir, "bin/$name/$arch")
-        val primary = installBinary(primaryDir, name, arch, ext)
-        if (primary.canExecute()) {
-            return primary
-        }
-
-        val fallbackDir = File(context.codeCacheDir, "bin/$name/$arch")
-        val fallback = installBinary(fallbackDir, name, arch, ext)
-        if (fallback.canExecute()) {
-            return fallback
-        }
-
-        throw IllegalStateException("Binary is not executable: ${primary.absolutePath}")
+        throw IllegalStateException("Missing native lib binary: ${nativePath.absolutePath}")
     }
 
     private fun resolveArch(): String {
@@ -41,40 +47,21 @@ class BinaryInstaller(private val context: Context) {
         }
     }
 
-    private fun copyAsset(assetPath: String, outFile: File) {
-        context.assets.open(assetPath).use { input ->
+    private fun copyFile(source: File, outFile: File) {
+        source.inputStream().use { input ->
             outFile.outputStream().use { output ->
                 input.copyTo(output)
             }
         }
     }
 
-    private fun installBinary(outDir: File, name: String, arch: String, ext: String): File {
+    private fun installBinary(outDir: File, name: String, source: File): File {
         if (!outDir.exists()) {
             outDir.mkdirs()
         }
-        val outFile = File(outDir, "$name$ext")
-        if (!outFile.exists()) {
-            val assetCandidates = listOf(
-                "flutter_assets/assets/binaries/$name/android-$arch/$name$ext",
-                "binaries/$name/android-$arch/$name$ext"
-            )
-            var lastError: Exception? = null
-            for (assetPath in assetCandidates) {
-                try {
-                    copyAsset(assetPath, outFile)
-                    lastError = null
-                    break
-                } catch (e: Exception) {
-                    lastError = e
-                }
-            }
-            if (lastError != null) {
-                throw IllegalStateException(
-                    "Missing Android binary: ${assetCandidates.joinToString()}",
-                    lastError
-                )
-            }
+        val outFile = File(outDir, name)
+        if (!outFile.exists() || outFile.length() != source.length()) {
+            copyFile(source, outFile)
         }
         try {
             outFile.setReadable(true, false)

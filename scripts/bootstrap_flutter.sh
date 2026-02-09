@@ -107,18 +107,6 @@ for i in range(flutter_idx + 1, len(lines)):
         break
 
 asset_entries = [
-    "    - assets/binaries/pingtunnel/android-arm64/",
-    "    - assets/binaries/pingtunnel/darwin-amd64/",
-    "    - assets/binaries/pingtunnel/darwin-arm64/",
-    "    - assets/binaries/pingtunnel/linux-amd64/",
-    "    - assets/binaries/pingtunnel/windows-amd64/",
-    "    - assets/binaries/pingtunnel/windows-arm64/",
-    "    - assets/binaries/tun2socks/android-arm64/",
-    "    - assets/binaries/tun2socks/darwin-amd64/",
-    "    - assets/binaries/tun2socks/darwin-arm64/",
-    "    - assets/binaries/tun2socks/linux-amd64/",
-    "    - assets/binaries/tun2socks/windows-amd64/",
-    "    - assets/binaries/tun2socks/windows-arm64/",
     "    - assets/scripts/linux/",
     "    - assets/scripts/macos/",
     "    - assets/scripts/windows/",
