@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class AssetManager {
@@ -42,33 +43,99 @@ class AssetManager {
   }
 
   Future<ByteData> _loadAsset(String assetPath) async {
-    try {
-      return await rootBundle.load(assetPath);
-    } catch (_) {
-      final fallback = await _loadAssetFromDisk(assetPath);
-      if (fallback != null) {
-        return fallback;
+    final candidates = _assetPathCandidates(assetPath);
+    Object? originalError;
+    StackTrace? originalStack;
+
+    for (var i = 0; i < candidates.length; i++) {
+      final candidate = candidates[i];
+      try {
+        return await rootBundle.load(candidate);
+      } catch (err, stack) {
+        if (i == 0) {
+          originalError = err;
+          originalStack = stack;
+        }
       }
-      rethrow;
     }
+
+    final fallback = await _loadAssetFromDisk(candidates);
+    if (fallback != null) {
+      return fallback;
+    }
+
+    if (originalError != null && originalStack != null) {
+      Error.throwWithStackTrace(originalError, originalStack);
+    }
+    throw FlutterError('Unable to load asset: $assetPath');
   }
 
-  Future<ByteData?> _loadAssetFromDisk(String assetPath) async {
-    for (final candidate in _candidatePaths(assetPath)) {
-      final file = File(candidate);
-      if (await file.exists()) {
-        final bytes = await file.readAsBytes();
-        return ByteData.sublistView(Uint8List.fromList(bytes));
+  Future<ByteData?> _loadAssetFromDisk(List<String> assetPaths) async {
+    for (final assetPath in assetPaths) {
+      for (final candidate in _candidatePaths(assetPath)) {
+        final file = File(candidate);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          return ByteData.sublistView(Uint8List.fromList(bytes));
+        }
       }
     }
     return null;
   }
 
+  List<String> _assetPathCandidates(String assetPath) {
+    final candidates = <String>{assetPath};
+
+    final normalized = _normalizeBinaryAssetPath(assetPath);
+    if (normalized != null && normalized.isNotEmpty) {
+      candidates.add(normalized);
+    }
+
+    if (assetPath.contains('/macos-')) {
+      candidates.add(assetPath.replaceAll('/macos-', '/darwin-'));
+    }
+    if (assetPath.contains('/darwin-')) {
+      candidates.add(assetPath.replaceAll('/darwin-', '/macos-'));
+    }
+
+    return candidates.toList();
+  }
+
+  String? _normalizeBinaryAssetPath(String assetPath) {
+    final flattened = RegExp(
+      r'^(assets/binaries/[^/]+)/(linux|windows|macos|darwin)-(amd64|arm64)-([^/]+)$',
+    );
+    final flat = flattened.firstMatch(assetPath);
+    if (flat != null) {
+      return '${flat.group(1)}/${flat.group(2)}-${flat.group(3)}/${flat.group(4)}';
+    }
+
+    final split = RegExp(
+      r'^(assets/binaries/[^/]+)/(linux|windows|macos|darwin)-(amd64|arm64)/([^/]+)$',
+    );
+    final grouped = split.firstMatch(assetPath);
+    if (grouped != null) {
+      return '${grouped.group(1)}/${grouped.group(2)}-${grouped.group(3)}-${grouped.group(4)}';
+    }
+
+    return null;
+  }
+
   List<String> _candidatePaths(String assetPath) {
-    final candidates = <String>[];
+    final candidates = <String>{};
+
     final override = Platform.environment['PINGTUNNEL_ASSETS_DIR'];
     if (override != null && override.isNotEmpty) {
       candidates.add(_join([override, assetPath]));
+    }
+
+    // Installed Linux/macOS bundle layout: <app-dir>/data/flutter_assets
+    final executable = Platform.resolvedExecutable;
+    if (executable.isNotEmpty) {
+      final exeDir = File(executable).parent;
+      candidates.add(_join([exeDir.path, 'data', 'flutter_assets', assetPath]));
+      candidates.add(_join([exeDir.parent.path, 'data', 'flutter_assets', assetPath]));
+      candidates.add(_join([exeDir.path, 'flutter_assets', assetPath]));
     }
 
     var dir = Directory.current;
@@ -77,6 +144,7 @@ class AssetManager {
       if (dir.parent.path == dir.path) break;
       dir = dir.parent;
     }
-    return candidates;
+
+    return candidates.toList();
   }
 }

@@ -52,7 +52,7 @@ Section: net
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: Pingtunnel Client <noreply@local>
-Depends: libc6, libgcc-s1, libstdc++6, libgtk-3-0, libglib2.0-0, policykit-1, libayatana-appindicator3-1 | libappindicator3-1
+Depends: libc6, libgcc-s1, libstdc++6, libgtk-3-0, libglib2.0-0, policykit-1, libcap2-bin, libayatana-appindicator3-1 | libappindicator3-1
 Description: Pingtunnel Client
  A Flutter client for pingtunnel proxy/VPN.
 EOF
@@ -86,11 +86,29 @@ install -m 755 "${ROOT_DIR}/templates/assets/scripts/linux/vpn_up.sh" \
 install -m 755 "${ROOT_DIR}/templates/assets/scripts/linux/vpn_down.sh" \
   "${STAGE_DIR}/usr/libexec/pingtunnel-client/vpn_down.sh"
 
+install -d "${STAGE_DIR}/usr/libexec/pingtunnel-client/binaries/pingtunnel/linux-${ARCH}"
+install -m 755 "${ROOT_DIR}/templates/assets/binaries/pingtunnel/linux-${ARCH}/pingtunnel" \
+  "${STAGE_DIR}/usr/libexec/pingtunnel-client/binaries/pingtunnel/linux-${ARCH}/pingtunnel"
+install -d "${STAGE_DIR}/usr/libexec/pingtunnel-client/binaries/tun2socks/linux-${ARCH}"
+install -m 755 "${ROOT_DIR}/templates/assets/binaries/tun2socks/linux-${ARCH}/tun2socks" \
+  "${STAGE_DIR}/usr/libexec/pingtunnel-client/binaries/tun2socks/linux-${ARCH}/tun2socks"
+
 install -d "${STAGE_DIR}/usr/share/polkit-1/actions"
 sed "s|@HELPER_PATH@|/usr/libexec/pingtunnel-client/vpn-helper|g" \
   "${ROOT_DIR}/templates/assets/scripts/linux/com.pingtunnel.client.vpn.policy.in" \
   > "${STAGE_DIR}/usr/share/polkit-1/actions/com.pingtunnel.client.vpn.policy"
 chmod 644 "${STAGE_DIR}/usr/share/polkit-1/actions/com.pingtunnel.client.vpn.policy"
+
+cat > "${STAGE_DIR}/DEBIAN/postinst" <<EOF
+#!/usr/bin/env bash
+set -e
+
+BIN="/usr/libexec/pingtunnel-client/binaries/pingtunnel/linux-${ARCH}/pingtunnel"
+if command -v setcap >/dev/null 2>&1 && [[ -f "\${BIN}" ]]; then
+  setcap cap_net_raw+ep "\${BIN}" || true
+fi
+EOF
+chmod 755 "${STAGE_DIR}/DEBIAN/postinst"
 
 install -d "${ROOT_DIR}/dist"
 dpkg-deb --build --root-owner-group \

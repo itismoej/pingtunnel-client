@@ -33,38 +33,76 @@ class DesktopRunner {
 
   Future<void> startProxy(TunnelConfig config) async {
     _platform ??= await _detectPlatform();
-    _pingtunnel = await _startPingtunnel(config);
+    final pingtunnel = await _startPingtunnel(config);
+    _pingtunnel = pingtunnel;
+    try {
+      await _waitForSocksReady(
+        pingtunnel,
+        config.localSocksPort,
+        platform: _platform!,
+      );
+    } catch (_) {
+      await _stopProcess(_pingtunnel);
+      _pingtunnel = null;
+      rethrow;
+    }
     _activeMode = TunnelMode.proxy;
   }
 
   Future<void> startVpn(TunnelConfig config) async {
     _platform ??= await _detectPlatform();
     final platform = _platform!;
+    bool vpnUpApplied = false;
 
-    _pingtunnel = await _startPingtunnel(config);
+    try {
+      final pingtunnel = await _startPingtunnel(config);
+      _pingtunnel = pingtunnel;
+      await _waitForSocksReady(
+        pingtunnel,
+        config.localSocksPort,
+        platform: platform,
+      );
 
-    final iface = config.interfaceName ?? await _detectInterface(platform);
-    if (iface == null) {
-      throw StateError('Failed to detect outbound interface. Provide ?iface=...');
+      final iface = config.interfaceName ?? await _detectInterface(platform);
+      if (iface == null) {
+        throw StateError('Failed to detect outbound interface. Provide ?iface=...');
+      }
+
+      final tunDevice = config.tunDevice ?? _defaultTunDevice(platform);
+
+      if (platform.isLinux) {
+        await _warnIfMissingNetAdmin();
+        await _runScript(platform, 'vpn_up', [tunDevice, iface], config);
+        vpnUpApplied = true;
+        _tun2socks = await _startTun2Socks(config, platform, tunDevice, iface);
+      } else if (platform.isMacos) {
+        _tun2socks = await _startTun2Socks(config, platform, tunDevice, iface);
+        await _runScript(platform, 'vpn_up', [tunDevice], config);
+        vpnUpApplied = true;
+      } else if (platform.isWindows) {
+        _tun2socks = await _startTun2Socks(config, platform, tunDevice, iface);
+        await _runScript(platform, 'vpn_up', [tunDevice], config);
+        vpnUpApplied = true;
+      } else {
+        throw UnsupportedError('Unsupported platform for VPN mode');
+      }
+
+      _activeMode = TunnelMode.vpn;
+    } catch (_) {
+      if (vpnUpApplied) {
+        try {
+          await _runScript(platform, 'vpn_down', [], null);
+        } catch (err) {
+          logBuffer.add('[vpn_down] $err');
+        }
+      }
+      await _stopProcess(_tun2socks);
+      await _stopProcess(_pingtunnel);
+      _tun2socks = null;
+      _pingtunnel = null;
+      _activeMode = null;
+      rethrow;
     }
-
-    final tunDevice = config.tunDevice ?? _defaultTunDevice(platform);
-
-    if (platform.isLinux) {
-      await _warnIfMissingNetAdmin();
-      await _runScript(platform, 'vpn_up', [tunDevice, iface], config);
-      _tun2socks = await _startTun2Socks(config, platform, tunDevice, iface);
-    } else if (platform.isMacos) {
-      _tun2socks = await _startTun2Socks(config, platform, tunDevice, iface);
-      await _runScript(platform, 'vpn_up', [tunDevice], config);
-    } else if (platform.isWindows) {
-      _tun2socks = await _startTun2Socks(config, platform, tunDevice, iface);
-      await _runScript(platform, 'vpn_up', [tunDevice], config);
-    } else {
-      throw UnsupportedError('Unsupported platform for VPN mode');
-    }
-
-    _activeMode = TunnelMode.vpn;
   }
 
   Future<void> stop() async {
@@ -101,7 +139,7 @@ class DesktopRunner {
       config,
     );
     if (platform.isLinux) {
-      await _warnIfMissingNetRaw();
+      await _warnIfMissingNetRaw(bin);
     }
 
     final args = <String>[
@@ -157,9 +195,25 @@ class DesktopRunner {
     TunnelConfig config,
   ) async {
     final ext = platform.isWindows ? '.exe' : '';
+    final systemBinary = _systemBinaryPath(name, platform, ext);
+    if (systemBinary != null) {
+      final file = File(systemBinary);
+      if (await file.exists()) {
+        return file.path;
+      }
+    }
+
     final assetPath = 'assets/binaries/$name/${platform.os}-${platform.arch}/$name$ext';
     final outputPath = 'bin/$name/${platform.os}-${platform.arch}/$name$ext';
     return assets.installAsset(assetPath, outputPath, executable: true);
+  }
+
+  String? _systemBinaryPath(String name, PlatformInfo platform, String ext) {
+    if (!platform.isLinux) {
+      return null;
+    }
+    final archDir = '${platform.os}-${platform.arch}';
+    return '/usr/libexec/pingtunnel-client/binaries/$name/$archDir/$name$ext';
   }
 
   Future<void> _runScript(
@@ -278,15 +332,20 @@ class DesktopRunner {
     return result.exitCode == 0;
   }
 
-  Future<void> _warnIfMissingNetRaw() async {
-    final hasNetRaw = await _hasProcessCapability(_capNetRaw);
-    if (!hasNetRaw) {
-      logBuffer.add(
-        '[warn] Linux needs CAP_NET_RAW for pingtunnel. '
-        'If you see "operation not permitted", run with NET_RAW '
-        '(docker --cap-add NET_RAW) or setcap cap_net_raw+ep on the binary.',
-      );
+  Future<void> _warnIfMissingNetRaw(String binaryPath) async {
+    if (await _hasProcessCapability(_capNetRaw)) {
+      return;
     }
+
+    if (await _binaryHasCapability(binaryPath, 'cap_net_raw')) {
+      return;
+    }
+
+    logBuffer.add(
+      '[warn] Linux needs CAP_NET_RAW for pingtunnel. '
+      'If you see "operation not permitted", run with NET_RAW '
+      '(docker --cap-add NET_RAW) or setcap cap_net_raw+ep on the binary.',
+    );
   }
 
   Future<void> _warnIfMissingNetAdmin() async {
@@ -314,6 +373,60 @@ class DesktopRunner {
     } catch (_) {
       return false;
     }
+  }
+
+  Future<bool> _binaryHasCapability(String path, String capability) async {
+    try {
+      final result = await Process.run('getcap', [path]);
+      if (result.exitCode != 0) {
+        return false;
+      }
+      final output = result.stdout.toString();
+      return output.contains(capability);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _waitForSocksReady(
+    Process process,
+    int port, {
+    required PlatformInfo platform,
+  }) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 4));
+
+    while (DateTime.now().isBefore(deadline)) {
+      final exitCode = await process.exitCode
+          .timeout(Duration.zero, onTimeout: () => -1);
+      if (exitCode >= 0) {
+        throw StateError(_pingtunnelStartFailureMessage(platform));
+      }
+
+      try {
+        final socket = await Socket.connect(
+          InternetAddress.loopbackIPv4,
+          port,
+          timeout: const Duration(milliseconds: 180),
+        );
+        socket.destroy();
+        return;
+      } catch (_) {}
+
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+
+    throw StateError(
+      'pingtunnel did not start its local SOCKS listener on 127.0.0.1:$port.',
+    );
+  }
+
+  String _pingtunnelStartFailureMessage(PlatformInfo platform) {
+    if (platform.isLinux) {
+      return 'pingtunnel exited before startup. '
+          'Linux requires CAP_NET_RAW for ICMP '
+          '(setcap cap_net_raw+ep <pingtunnel-binary> or run with NET_RAW).';
+    }
+    return 'pingtunnel exited before startup. Check configuration and logs.';
   }
 
   Future<Process> _startProcess(String bin, List<String> args,
