@@ -49,10 +49,11 @@ if [[ -d "${ANDROID_MAIN}" ]]; then
   fi
 fi
 
-python - <<PY
+APP_DIR="${APP_DIR}" python - <<'PY'
+import os
 from pathlib import Path
 
-pubspec = Path("${APP_DIR}/pubspec.yaml")
+pubspec = Path(os.environ["APP_DIR"]) / "pubspec.yaml"
 text = pubspec.read_text()
 lines = text.splitlines()
 
