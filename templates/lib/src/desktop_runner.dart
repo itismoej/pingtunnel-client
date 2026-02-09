@@ -216,6 +216,16 @@ class DesktopRunner {
     return '/usr/libexec/pingtunnel-client/binaries/$name/$archDir/$name$ext';
   }
 
+  String? _systemScriptPath(String scriptName, PlatformInfo platform) {
+    if (!platform.isLinux) {
+      return null;
+    }
+    if (scriptName == 'vpn_up' || scriptName == 'vpn_down') {
+      return '/usr/libexec/pingtunnel-client/$scriptName.sh';
+    }
+    return null;
+  }
+
   Future<void> _runScript(
     PlatformInfo platform,
     String scriptName,
@@ -248,11 +258,17 @@ class DesktopRunner {
       );
       await _runCommand(scriptPath, args, label: scriptName);
     } else if (platform.isLinux) {
-      final scriptPath = await assets.installAsset(
-        'assets/scripts/linux/$scriptName.sh',
-        'scripts/linux/$scriptName.sh',
-        executable: true,
-      );
+      final systemScript = _systemScriptPath(scriptName, platform);
+      late final String scriptPath;
+      if (systemScript != null && await File(systemScript).exists()) {
+        scriptPath = systemScript;
+      } else {
+        scriptPath = await assets.installAsset(
+          'assets/scripts/linux/$scriptName.sh',
+          'scripts/linux/$scriptName.sh',
+          executable: true,
+        );
+      }
       final scriptArgs = List<String>.from(args);
       if (scriptName == 'vpn_up') {
         scriptArgs.add(config?.serverHost ?? '');
