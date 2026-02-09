@@ -18,30 +18,112 @@ Future<void> main() async {
   runApp(const PingtunnelApp());
 }
 
-class PingtunnelApp extends StatelessWidget {
+class PingtunnelApp extends StatefulWidget {
   const PingtunnelApp({super.key});
+
+  @override
+  State<PingtunnelApp> createState() => _PingtunnelAppState();
+}
+
+class _PingtunnelAppState extends State<PingtunnelApp> {
+  static const _prefsKeyThemeMode = 'theme_mode';
+
+  ThemeMode _themeMode = ThemeMode.system;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadThemeMode());
+  }
+
+  Future<void> _loadThemeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_prefsKeyThemeMode);
+    final mode = _themeModeFromStorage(saved);
+    if (!mounted || mode == _themeMode) return;
+    setState(() {
+      _themeMode = mode;
+    });
+  }
+
+  Future<void> _setThemeMode(ThemeMode mode) async {
+    if (mode == _themeMode) return;
+    setState(() {
+      _themeMode = mode;
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsKeyThemeMode, _themeModeToStorage(mode));
+  }
+
+  String _themeModeToStorage(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.light:
+        return 'light';
+      case ThemeMode.dark:
+        return 'dark';
+      case ThemeMode.system:
+        return 'system';
+    }
+  }
+
+  ThemeMode _themeModeFromStorage(String? value) {
+    switch (value) {
+      case 'light':
+        return ThemeMode.light;
+      case 'dark':
+        return ThemeMode.dark;
+      default:
+        return ThemeMode.system;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     const primary = Color(0xFF0E7A6A);
+    final lightScheme = ColorScheme.fromSeed(
+      seedColor: primary,
+      brightness: Brightness.light,
+    );
+    final darkScheme = ColorScheme.fromSeed(
+      seedColor: primary,
+      brightness: Brightness.dark,
+    );
 
     return MaterialApp(
       title: 'Pingtunnel Client',
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: primary, brightness: Brightness.light),
-        scaffoldBackgroundColor: const Color(0xFFF7F5F0),
+        colorScheme: lightScheme,
+        scaffoldBackgroundColor: lightScheme.surface,
         cardTheme: CardThemeData(
-          color: Colors.white,
+          color: lightScheme.surfaceContainerLow,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFFE3DED5)),
+            side: BorderSide(color: lightScheme.outlineVariant),
           ),
           margin: EdgeInsets.zero,
         ),
       ),
-      home: const ConnectionListPage(),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: darkScheme,
+        scaffoldBackgroundColor: darkScheme.surface,
+        cardTheme: CardThemeData(
+          color: darkScheme.surfaceContainerLow,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: darkScheme.outlineVariant),
+          ),
+          margin: EdgeInsets.zero,
+        ),
+      ),
+      themeMode: _themeMode,
+      home: ConnectionListPage(
+        themeMode: _themeMode,
+        onThemeModeChanged: _setThemeMode,
+      ),
     );
   }
 }
@@ -83,7 +165,14 @@ String buildConnectionUri(TunnelConfig config) {
 }
 
 class ConnectionListPage extends StatefulWidget {
-  const ConnectionListPage({super.key});
+  const ConnectionListPage({
+    super.key,
+    required this.themeMode,
+    required this.onThemeModeChanged,
+  });
+
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
 
   @override
   State<ConnectionListPage> createState() => _ConnectionListPageState();
@@ -638,6 +727,28 @@ class _ConnectionListPageState extends State<ConnectionListPage>
     _scheduleLinuxTrayRefresh();
   }
 
+  IconData _themeModeIcon(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.light:
+        return Icons.light_mode;
+      case ThemeMode.dark:
+        return Icons.dark_mode;
+      case ThemeMode.system:
+        return Icons.brightness_auto;
+    }
+  }
+
+  String _themeModeLabel(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.light:
+        return 'Light';
+      case ThemeMode.dark:
+        return 'Dark';
+      case ThemeMode.system:
+        return 'System';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final entries = _entries;
@@ -651,6 +762,25 @@ class _ConnectionListPageState extends State<ConnectionListPage>
       appBar: AppBar(
         title: const Text('Connections'),
         actions: [
+          PopupMenuButton<ThemeMode>(
+            initialValue: widget.themeMode,
+            tooltip: 'Theme',
+            onSelected: widget.onThemeModeChanged,
+            itemBuilder: (context) => <PopupMenuEntry<ThemeMode>>[
+              for (final mode in ThemeMode.values)
+                PopupMenuItem<ThemeMode>(
+                  value: mode,
+                  child: Row(
+                    children: [
+                      Icon(_themeModeIcon(mode), size: 18),
+                      const SizedBox(width: 8),
+                      Text(_themeModeLabel(mode)),
+                    ],
+                  ),
+                ),
+            ],
+            icon: Icon(_themeModeIcon(widget.themeMode)),
+          ),
           IconButton(
             onPressed: _addFromClipboard,
             icon: const Icon(Icons.content_paste),
@@ -784,13 +914,14 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.link, size: 48, color: Color(0xFF9A948E)),
+            Icon(Icons.link, size: 48, color: colors.outline),
             const SizedBox(height: 16),
             Text(
               'No connections yet',
@@ -897,27 +1028,28 @@ class _StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     String label;
     Color color;
+    final colors = Theme.of(context).colorScheme;
 
     if (!isActive) {
       label = 'Idle';
-      color = const Color(0xFF9A948E);
+      color = colors.outline;
     } else {
       switch (status) {
         case TunnelStatus.connected:
           label = 'Connected';
-          color = Theme.of(context).colorScheme.primary;
+          color = colors.primary;
           break;
         case TunnelStatus.connecting:
           label = 'Connecting';
-          color = Theme.of(context).colorScheme.secondary;
+          color = colors.secondary;
           break;
         case TunnelStatus.error:
           label = 'Error';
-          color = Theme.of(context).colorScheme.error;
+          color = colors.error;
           break;
         case TunnelStatus.disconnected:
           label = 'Disconnected';
-          color = const Color(0xFF9A948E);
+          color = colors.outline;
           break;
       }
     }
@@ -1370,7 +1502,7 @@ class _StatusCard extends StatelessWidget {
           title: 'Disconnected',
           subtitle: 'Not connected',
           icon: Icons.radio_button_unchecked,
-          color: const Color(0xFF9A948E),
+          color: colors.outline,
         );
     }
   }
@@ -1644,7 +1776,7 @@ class _LogsCard extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               constraints: const BoxConstraints(minHeight: 120),
               decoration: BoxDecoration(
-                color: const Color(0xFFF4F1EB),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SingleChildScrollView(
