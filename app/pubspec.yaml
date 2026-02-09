@@ -1,4 +1,4 @@
-name: "Pingtunnel Client"
+name: app
 description: "Desktop and Android client for pingtunnel with easy Proxy/VPN switching."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
