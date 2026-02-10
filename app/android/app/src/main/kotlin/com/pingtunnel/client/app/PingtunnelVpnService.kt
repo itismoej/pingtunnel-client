@@ -15,6 +15,7 @@ class PingtunnelVpnService : VpnService() {
     private var tun2socksProcess: Process? = null
     private var tunFd: FileDescriptor? = null
     private var tunParcel: ParcelFileDescriptor? = null
+    private var currentConfig: TunnelConfig? = null
     private lateinit var installer: BinaryInstaller
 
     override fun onCreate() {
@@ -25,6 +26,7 @@ class PingtunnelVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
             ServiceState.vpnRunning = false
+            ServiceState.notifyStateChanged(this)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -32,7 +34,9 @@ class PingtunnelVpnService : VpnService() {
         val action = intent.action
         if (action == Constants.ACTION_STOP) {
             stopVpn()
+            currentConfig = null
             ServiceState.vpnRunning = false
+            ServiceState.notifyStateChanged(this)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
             } else {
@@ -42,32 +46,27 @@ class PingtunnelVpnService : VpnService() {
             return START_NOT_STICKY
         }
 
-        val config = TunnelConfig.fromIntent(intent)
-        val disconnectIntent = ServiceNotifications.createServiceActionIntent(
-            this,
-            PingtunnelVpnService::class.java,
-            Constants.ACTION_STOP,
-            2001
-        )
-        val notification = ServiceNotifications.createForegroundNotification(
-            this,
-            "Pingtunnel VPN",
-            "Connected to ${config.serverHost}",
-            disconnectIntent
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(2, notification)
+        if (action == Constants.ACTION_RESTORE_NOTIFICATION) {
+            if (ServiceState.vpnRunning && pingtunnelProcess != null) {
+                startOrUpdateForeground(currentConfig)
+                return START_STICKY
+            }
+            return START_NOT_STICKY
         }
+
+        val config = TunnelConfig.fromIntent(intent)
+        currentConfig = config
+        startOrUpdateForeground(config)
 
         try {
             startVpn(config)
             ServiceState.vpnRunning = true
             ServiceState.proxyRunning = false
+            ServiceState.notifyStateChanged(this)
         } catch (e: Exception) {
             Log.e("PingtunnelVPN", "Failed to start", e)
             ServiceState.vpnRunning = false
+            ServiceState.notifyStateChanged(this)
             stopSelf()
         }
 
@@ -76,7 +75,9 @@ class PingtunnelVpnService : VpnService() {
 
     override fun onDestroy() {
         stopVpn()
+        currentConfig = null
         ServiceState.vpnRunning = false
+        ServiceState.notifyStateChanged(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -88,6 +89,7 @@ class PingtunnelVpnService : VpnService() {
     override fun onRevoke() {
         stopVpn()
         ServiceState.vpnRunning = false
+        ServiceState.notifyStateChanged(this)
         super.onRevoke()
     }
 
@@ -133,6 +135,7 @@ class PingtunnelVpnService : VpnService() {
         tun2socksProcess = null
         pingtunnelProcess = null
         ServiceState.vpnRunning = false
+        ServiceState.notifyStateChanged(this)
 
         tunFd = null
 
@@ -162,5 +165,33 @@ class PingtunnelVpnService : VpnService() {
             "info"
         )
         return ProcessUtils.startProcessWithStdinFd("tun2socks", args, filesDir, fd)
+    }
+
+    private fun startOrUpdateForeground(config: TunnelConfig?) {
+        val disconnectIntent = ServiceNotifications.createServiceActionIntent(
+            this,
+            PingtunnelVpnService::class.java,
+            Constants.ACTION_STOP,
+            2001
+        )
+        val restoreIntent = ServiceNotifications.createServiceActionIntent(
+            this,
+            PingtunnelVpnService::class.java,
+            Constants.ACTION_RESTORE_NOTIFICATION,
+            2002
+        )
+        val serverHost = config?.serverHost?.takeIf { it.isNotBlank() } ?: "active tunnel"
+        val notification = ServiceNotifications.createForegroundNotification(
+            this,
+            "Pingtunnel VPN",
+            "Connected to $serverHost",
+            disconnectIntent,
+            restoreIntent
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(2, notification)
+        }
     }
 }

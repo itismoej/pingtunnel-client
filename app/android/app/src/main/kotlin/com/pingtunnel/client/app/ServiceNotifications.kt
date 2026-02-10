@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 
 object ServiceNotifications {
     private const val CHANNEL_ID = "pingtunnel"
@@ -17,19 +18,27 @@ object ServiceNotifications {
         context: Context,
         title: String,
         text: String,
-        disconnectIntent: PendingIntent
+        disconnectIntent: PendingIntent,
+        restoreIntent: PendingIntent,
+        connected: Boolean = true
     ): Notification {
         ensureChannel(context)
         val openAppIntent = createOpenAppIntent(context)
+        val iconRes = if (connected) R.drawable.ic_stat_ping_connected else R.drawable.ic_stat_ping
+        val colorRes = if (connected) R.color.notification_connected else R.color.notification_disconnected
         return NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_ping)
+            .setSmallIcon(iconRes)
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(openAppIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setColor(ContextCompat.getColor(context, colorRes))
+            .setColorized(true)
             .setOnlyAlertOnce(true)
+            .setAutoCancel(false)
             .setOngoing(true)
+            .setDeleteIntent(restoreIntent)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "Disconnect",
