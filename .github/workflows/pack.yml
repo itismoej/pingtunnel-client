@@ -141,6 +141,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
+          generate_release_notes: false
+          make_latest: true
+          body: |
+            Pingtunnel Client ${{ github.ref_name }} includes:
+            - Android quick settings toggle and persistent connection notification improvements.
+            - Linux tray icon connection-state color.
+            - Refreshed app icons for Android, macOS, and Windows.
           files: |
             release-assets/*
