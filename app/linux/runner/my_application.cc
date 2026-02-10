@@ -20,7 +20,10 @@ struct _MyApplication {
   GtkWindow* window;
   FlMethodChannel* tray_channel;
   AppIndicator* tray_indicator;
-  gchar* tray_icon_path;
+  gchar* tray_icon_path_off;
+  gchar* tray_icon_path_on;
+  gchar* tray_icon_name_off;
+  gchar* tray_icon_name_on;
   GtkWidget* tray_menu;
   GtkWidget* tray_item_show;
   GtkWidget* tray_item_disconnect;
@@ -33,28 +36,47 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
-static gchar* ensure_tray_icon_path() {
+static gboolean ensure_tray_icon_paths(gchar** off_path, gchar** on_path) {
   const gchar* cache_dir = g_get_user_cache_dir();
   if (cache_dir == nullptr) {
-    return nullptr;
+    return FALSE;
   }
 
   g_autofree gchar* dir = g_build_filename(cache_dir, "pingtunnel-client", nullptr);
   if (g_mkdir_with_parents(dir, 0755) != 0) {
-    return nullptr;
+    return FALSE;
   }
 
-  gchar* path = g_build_filename(dir, "tray-ping-v10.svg", nullptr);
-  static const gchar* kSvgIcon =
+  g_autofree gchar* off_path_local = g_build_filename(dir, "tray-ping-off.svg", nullptr);
+  g_autofree gchar* on_path_local = g_build_filename(dir, "tray-ping-on.svg", nullptr);
+  static const gchar* kSvgIconOff =
       R"svg(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><g fill="#fff" transform="translate(4.8 0) scale(1.0666667)"><path d="M21,10.5C21,4.7,16.3,0,10.5,0S0,4.7,0,10.5c0,2.457,0.85,4.711,2.264,6.5h16.473C20.15,15.211,21,12.957,21,10.5z"/><path d="M17.843,18H3.157c1.407,1.377,3.199,2.361,5.2,2.777l-0.764,7.865c-0.038,0.346,0.072,0.691,0.305,0.95C8.13,29.852,8.461,30,8.809,30h3.381c0.348,0,0.679-0.148,0.91-0.407c0.232-0.259,0.343-0.604,0.305-0.95l-0.764-7.864C14.643,20.362,16.436,19.378,17.843,18z"/><circle cx="18.999" cy="24" r="2"/></g></svg>)svg";
+  static const gchar* kSvgIconOn =
+      R"svg(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><g fill="#4caf50" transform="translate(4.8 0) scale(1.0666667)"><path d="M21,10.5C21,4.7,16.3,0,10.5,0S0,4.7,0,10.5c0,2.457,0.85,4.711,2.264,6.5h16.473C20.15,15.211,21,12.957,21,10.5z"/><path d="M17.843,18H3.157c1.407,1.377,3.199,2.361,5.2,2.777l-0.764,7.865c-0.038,0.346,0.072,0.691,0.305,0.95C8.13,29.852,8.461,30,8.809,30h3.381c0.348,0,0.679-0.148,0.91-0.407c0.232-0.259,0.343-0.604,0.305-0.95l-0.764-7.864C14.643,20.362,16.436,19.378,17.843,18z"/><circle cx="18.999" cy="24" r="2"/></g></svg>)svg";
 
   g_autoptr(GError) error = nullptr;
-  if (!g_file_set_contents(path, kSvgIcon, -1, &error)) {
-    g_free(path);
-    return nullptr;
+  if (!g_file_set_contents(off_path_local, kSvgIconOff, -1, &error)) {
+    return FALSE;
+  }
+  if (!g_file_set_contents(on_path_local, kSvgIconOn, -1, &error)) {
+    return FALSE;
   }
 
-  return path;
+  *off_path = g_strdup(off_path_local);
+  *on_path = g_strdup(on_path_local);
+  return TRUE;
+}
+
+static gchar* icon_name_without_extension(const gchar* icon_path) {
+  if (icon_path == nullptr) {
+    return nullptr;
+  }
+  g_autofree gchar* icon_name = g_path_get_basename(icon_path);
+  gchar* dot = g_strrstr(icon_name, ".");
+  if (dot != nullptr) {
+    *dot = '\0';
+  }
+  return g_strdup(icon_name);
 }
 
 static void present_window(MyApplication* self) {
@@ -151,19 +173,22 @@ static void initialize_tray(MyApplication* self) {
 
   gtk_widget_show_all(self->tray_menu);
 
-  self->tray_icon_path = ensure_tray_icon_path();
-  if (self->tray_icon_path != nullptr) {
-    g_autofree gchar* icon_dir = g_path_get_dirname(self->tray_icon_path);
-    g_autofree gchar* icon_name = g_path_get_basename(self->tray_icon_path);
-    gchar* dot = g_strrstr(icon_name, ".");
-    if (dot != nullptr) {
-      *dot = '\0';
+  if (ensure_tray_icon_paths(&self->tray_icon_path_off, &self->tray_icon_path_on)) {
+    self->tray_icon_name_off = icon_name_without_extension(self->tray_icon_path_off);
+    self->tray_icon_name_on = icon_name_without_extension(self->tray_icon_path_on);
+    if (self->tray_icon_name_on == nullptr && self->tray_icon_name_off != nullptr) {
+      self->tray_icon_name_on = g_strdup(self->tray_icon_name_off);
     }
+  }
+
+  if (self->tray_icon_path_off != nullptr && self->tray_icon_name_off != nullptr) {
+    g_autofree gchar* icon_dir = g_path_get_dirname(self->tray_icon_path_off);
     self->tray_indicator = app_indicator_new_with_path(
-        "pingtunnel-client", icon_name, APP_INDICATOR_CATEGORY_APPLICATION_STATUS,
+        "pingtunnel-client", self->tray_icon_name_off,
+        APP_INDICATOR_CATEGORY_APPLICATION_STATUS,
         icon_dir);
     app_indicator_set_icon_theme_path(self->tray_indicator, icon_dir);
-    app_indicator_set_icon(self->tray_indicator, icon_name);
+    app_indicator_set_icon(self->tray_indicator, self->tray_icon_name_off);
   } else {
     self->tray_indicator =
         app_indicator_new("pingtunnel-client", "application-x-executable",
@@ -202,6 +227,13 @@ static FlMethodResponse* update_tray_state(MyApplication* self, FlValue* args) {
 
   self->tray_connected = connected;
   self->tray_has_target = has_target;
+  if (self->tray_indicator != nullptr && self->tray_icon_name_off != nullptr) {
+    const gchar* icon_name =
+        connected && self->tray_icon_name_on != nullptr
+            ? self->tray_icon_name_on
+            : self->tray_icon_name_off;
+    app_indicator_set_icon(self->tray_indicator, icon_name);
+  }
 
   if (self->tray_item_disconnect != nullptr) {
     gtk_menu_item_set_label(GTK_MENU_ITEM(self->tray_item_disconnect),
@@ -375,7 +407,10 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
-  g_clear_pointer(&self->tray_icon_path, g_free);
+  g_clear_pointer(&self->tray_icon_path_off, g_free);
+  g_clear_pointer(&self->tray_icon_path_on, g_free);
+  g_clear_pointer(&self->tray_icon_name_off, g_free);
+  g_clear_pointer(&self->tray_icon_name_on, g_free);
   g_clear_object(&self->tray_channel);
   g_clear_object(&self->tray_indicator);
 
@@ -402,7 +437,10 @@ static void my_application_init(MyApplication* self) {
   self->window = nullptr;
   self->tray_channel = nullptr;
   self->tray_indicator = nullptr;
-  self->tray_icon_path = nullptr;
+  self->tray_icon_path_off = nullptr;
+  self->tray_icon_path_on = nullptr;
+  self->tray_icon_name_off = nullptr;
+  self->tray_icon_name_on = nullptr;
   self->tray_menu = nullptr;
   self->tray_item_show = nullptr;
   self->tray_item_disconnect = nullptr;
