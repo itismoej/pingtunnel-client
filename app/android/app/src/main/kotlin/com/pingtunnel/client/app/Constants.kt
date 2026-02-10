@@ -4,6 +4,8 @@ object Constants {
     const val CHANNEL = "pingtunnel"
     const val ACTION_START = "com.pingtunnel.client.app.START"
     const val ACTION_STOP = "com.pingtunnel.client.app.STOP"
+    const val ACTION_RESTORE_NOTIFICATION = "com.pingtunnel.client.app.RESTORE_NOTIFICATION"
+    const val PREFS_LAST_CONFIG = "last_tunnel_config"
 
     const val EXTRA_SERVER_HOST = "serverHost"
     const val EXTRA_SERVER_PORT = "serverPort"

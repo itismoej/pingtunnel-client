@@ -79,19 +79,23 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun startProxy(config: TunnelConfig) {
+        LastTunnelConfigStore.save(this, config)
         val intent = Intent(this, PingtunnelProxyService::class.java).apply {
             action = Constants.ACTION_START
             putExtras(config)
         }
         ContextCompat.startForegroundService(this, intent)
+        ServiceState.notifyStateChanged(this)
     }
 
     private fun startVpn(config: TunnelConfig) {
+        LastTunnelConfigStore.save(this, config)
         val intent = Intent(this, PingtunnelVpnService::class.java).apply {
             action = Constants.ACTION_START
             putExtras(config)
         }
         ContextCompat.startForegroundService(this, intent)
+        ServiceState.notifyStateChanged(this)
     }
 
     private fun stopServices() {
@@ -105,6 +109,7 @@ class MainActivity : FlutterActivity() {
         startService(vpnIntent)
         stopService(proxyIntent)
         stopService(vpnIntent)
+        ServiceState.notifyStateChanged(this)
     }
 
     private fun Intent.putExtras(config: TunnelConfig) {
