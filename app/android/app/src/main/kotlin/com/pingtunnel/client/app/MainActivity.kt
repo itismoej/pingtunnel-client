@@ -46,6 +46,9 @@ class MainActivity : FlutterActivity() {
                     "isRunning" -> {
                         result.success(ServiceState.isAnyRunning())
                     }
+                    "listLaunchableApps" -> {
+                        result.success(listLaunchableApps())
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -112,6 +115,34 @@ class MainActivity : FlutterActivity() {
         ServiceState.notifyStateChanged(this)
     }
 
+    private fun listLaunchableApps(): List<Map<String, String>> {
+        val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+        val seen = LinkedHashMap<String, String>()
+        val resolves = packageManager.queryIntentActivities(launcherIntent, 0)
+        for (resolveInfo in resolves) {
+            val activityInfo = resolveInfo.activityInfo ?: continue
+            val appPackage = activityInfo.packageName ?: continue
+            if (appPackage == packageName) {
+                continue
+            }
+            if (seen.containsKey(appPackage)) {
+                continue
+            }
+            val label = resolveInfo.loadLabel(packageManager)?.toString()?.trim().orEmpty()
+            seen[appPackage] = if (label.isEmpty()) appPackage else label
+        }
+        return seen.entries
+            .sortedWith(
+                compareBy<Map.Entry<String, String>>(
+                    { it.value.lowercase() },
+                    { it.key.lowercase() }
+                )
+            )
+            .map { mapOf("packageName" to it.key, "label" to it.value) }
+    }
+
     private fun Intent.putExtras(config: TunnelConfig) {
         putExtra(Constants.EXTRA_SERVER_HOST, config.serverHost)
         config.serverPort?.let { putExtra(Constants.EXTRA_SERVER_PORT, it) }
@@ -123,6 +154,10 @@ class MainActivity : FlutterActivity() {
         config.interfaceName?.let { putExtra(Constants.EXTRA_IFACE, it) }
         config.tunDevice?.let { putExtra(Constants.EXTRA_TUN, it) }
         config.dns?.let { putExtra(Constants.EXTRA_DNS, it) }
+        putStringArrayListExtra(
+            Constants.EXTRA_PROXY_PER_APP_PACKAGES,
+            ArrayList(config.proxyPerAppPackages)
+        )
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

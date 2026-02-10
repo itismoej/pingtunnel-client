@@ -1,4 +1,4 @@
-enum TunnelMode { proxy, vpn }
+enum TunnelMode { proxy, vpn, proxyPerApp }
 
 class TunnelConfig {
   TunnelConfig({
@@ -12,6 +12,7 @@ class TunnelConfig {
     this.interfaceName,
     this.tunDevice,
     this.dns,
+    this.proxyPerAppPackages = const <String>[],
   });
 
   final String serverHost;
@@ -24,6 +25,7 @@ class TunnelConfig {
   final String? interfaceName;
   final String? tunDevice;
   final String? dns;
+  final List<String> proxyPerAppPackages;
 
   TunnelConfig copyWith({
     String? serverHost,
@@ -36,6 +38,7 @@ class TunnelConfig {
     String? interfaceName,
     String? tunDevice,
     String? dns,
+    List<String>? proxyPerAppPackages,
   }) {
     return TunnelConfig(
       serverHost: serverHost ?? this.serverHost,
@@ -48,6 +51,8 @@ class TunnelConfig {
       interfaceName: interfaceName ?? this.interfaceName,
       tunDevice: tunDevice ?? this.tunDevice,
       dns: dns ?? this.dns,
+      proxyPerAppPackages:
+          proxyPerAppPackages != null ? List<String>.from(proxyPerAppPackages) : this.proxyPerAppPackages,
     );
   }
 
@@ -64,12 +69,17 @@ class TunnelConfig {
       'serverPort': serverPort,
       'localSocksPort': localSocksPort,
       'key': key,
-      'mode': mode == TunnelMode.vpn ? 'vpn' : 'proxy',
+      'mode': switch (mode) {
+        TunnelMode.proxy => 'proxy',
+        TunnelMode.vpn => 'vpn',
+        TunnelMode.proxyPerApp => 'proxy_per_app',
+      },
       'encryptMode': encryptMode,
       'encryptKey': encryptKey,
       'interfaceName': interfaceName,
       'tunDevice': tunDevice,
       'dns': dns,
+      'proxyPerAppPackages': proxyPerAppPackages,
     };
   }
 
@@ -95,7 +105,18 @@ class TunnelConfig {
     final serverPort = int.tryParse(params['port'] ?? params['server_port'] ?? '');
 
     final modeValue = (params['mode'] ?? params['vpn'] ?? 'proxy').toLowerCase();
-    final mode = (modeValue == 'vpn' || modeValue == '1') ? TunnelMode.vpn : TunnelMode.proxy;
+    final mode = switch (modeValue) {
+      'vpn' || '1' => TunnelMode.vpn,
+      'proxy_per_app' || 'proxy-per-app' || 'per_app' || 'app' || 'app_proxy' => TunnelMode.proxyPerApp,
+      _ => TunnelMode.proxy,
+    };
+    final proxyPerAppPackages = (params['apps'] ?? '')
+        .split(',')
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
 
     final encryptValue = (params['encrypt'] ??
             params['encrypt_mode'] ??
@@ -134,6 +155,7 @@ class TunnelConfig {
       interfaceName: params['iface'] ?? params['interface'],
       tunDevice: params['tun'] ?? params['tun_device'],
       dns: params['dns'],
+      proxyPerAppPackages: proxyPerAppPackages,
     );
   }
 }

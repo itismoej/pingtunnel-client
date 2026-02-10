@@ -26,7 +26,7 @@ class TunnelController {
   String? lastError;
 
   Future<String> testConnection(TunnelConfig config) async {
-    if (config.mode == TunnelMode.vpn) {
+    if (config.mode == TunnelMode.vpn || config.mode == TunnelMode.proxyPerApp) {
       final socksProbe = Socks5Probe();
       logBuffer.add('[test] VPN mode: checking tunnel core via SOCKS5...');
       try {
@@ -60,7 +60,9 @@ class TunnelController {
     try {
       final runtimeConfig = await _resolveServerHost(config);
       if (Platform.isAndroid) {
-        if (runtimeConfig.mode == TunnelMode.vpn) {
+        if (
+            runtimeConfig.mode == TunnelMode.vpn ||
+            runtimeConfig.mode == TunnelMode.proxyPerApp) {
           final ok = await _androidRunner.prepareVpn();
           if (!ok) {
             throw StateError('VPN permission not granted');
@@ -99,6 +101,13 @@ class TunnelController {
       return false;
     }
     return _androidRunner.isRunning();
+  }
+
+  Future<List<AndroidAppInfo>> listAndroidLaunchableApps() async {
+    if (!Platform.isAndroid) {
+      return <AndroidAppInfo>[];
+    }
+    return _androidRunner.listLaunchableApps();
   }
 
   void markDisconnectedExternally() {

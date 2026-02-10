@@ -143,7 +143,11 @@ typedef SaveConnection = void Function(ConnectionEntry entry, {bool showMessage}
 String buildConnectionUri(TunnelConfig config) {
   final params = <String, String>{
     'lport': config.localSocksPort.toString(),
-    'mode': config.mode == TunnelMode.vpn ? 'vpn' : 'proxy',
+    'mode': switch (config.mode) {
+      TunnelMode.proxy => 'proxy',
+      TunnelMode.vpn => 'vpn',
+      TunnelMode.proxyPerApp => 'proxy_per_app',
+    },
   };
   if (config.encryptMode == null && config.key != null) {
     params['key'] = config.key.toString();
@@ -156,6 +160,10 @@ String buildConnectionUri(TunnelConfig config) {
     if (config.encryptKey != null && config.encryptKey!.isNotEmpty) {
       params['encrypt_key'] = config.encryptKey!;
     }
+  }
+  if (config.proxyPerAppPackages.isNotEmpty) {
+    final sortedPackages = [...config.proxyPerAppPackages]..sort();
+    params['apps'] = sortedPackages.join(',');
   }
   return Uri(
     scheme: 'pingtunnel',
@@ -259,7 +267,8 @@ class _ConnectionListPageState extends State<ConnectionListPage>
     final active = _activeEntry();
     final selected = _selectedEntry();
     final target = active ?? selected;
-    final mode = target?.config.mode == TunnelMode.vpn
+    final mode = target?.config.mode == TunnelMode.vpn ||
+            target?.config.mode == TunnelMode.proxyPerApp
         ? 'vpn'
         : target?.config.mode == TunnelMode.proxy
             ? 'proxy'
@@ -967,8 +976,13 @@ class _ConnectionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final modeText = switch (entry.config.mode) {
+      TunnelMode.proxy => 'Proxy',
+      TunnelMode.vpn => 'VPN',
+      TunnelMode.proxyPerApp => 'Proxy per app (${entry.config.proxyPerAppPackages.length})',
+    };
     final subtitle = StringBuffer()
-      ..write(entry.config.mode == TunnelMode.vpn ? 'VPN' : 'Proxy')
+      ..write(modeText)
       ..write('  •  ')
       ..write('Local ${entry.config.localSocksPort}');
 
@@ -1108,6 +1122,9 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
   late final TextEditingController _encryptKeyController;
   late TunnelMode _mode;
   late String _encryptMode;
+  late List<String> _proxyPerAppPackages;
+  final Map<String, String> _proxyPerAppLabels = <String, String>{};
+  bool _loadingProxyPerAppApps = false;
 
   @override
   void initState() {
@@ -1123,6 +1140,10 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
         TextEditingController(text: _entry.config.serverPort?.toString() ?? '');
     _encryptKeyController = TextEditingController(text: _entry.config.encryptKey ?? '');
     _encryptMode = _entry.config.encryptMode ?? 'none';
+    _proxyPerAppPackages = [..._entry.config.proxyPerAppPackages]..sort();
+    for (final packageName in _proxyPerAppPackages) {
+      _proxyPerAppLabels[packageName] = packageName;
+    }
     _hostController.addListener(_markDirty);
     _keyController.addListener(_markDirty);
     _localPortController.addListener(_markDirty);
@@ -1158,12 +1179,159 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
     });
   }
 
+  bool get _isProxyPerAppMode => _mode == TunnelMode.proxyPerApp;
+
+  bool _validateProxyPerAppSelection({bool showMessage = true}) {
+    if (!_isProxyPerAppMode) {
+      return true;
+    }
+    if (_proxyPerAppPackages.isNotEmpty) {
+      return true;
+    }
+    if (showMessage) {
+      _showMessage('Select at least one app for Proxy per app mode');
+    }
+    return false;
+  }
+
+  Future<void> _pickProxyPerAppApps() async {
+    if (!Platform.isAndroid || _isActive || _loadingProxyPerAppApps) {
+      return;
+    }
+    setState(() {
+      _loadingProxyPerAppApps = true;
+    });
+
+    try {
+      final apps = await widget.controller.listAndroidLaunchableApps();
+      if (!mounted) {
+        return;
+      }
+      if (apps.isEmpty) {
+        _showMessage('No launchable apps found');
+        return;
+      }
+
+      for (final app in apps) {
+        _proxyPerAppLabels[app.packageName] = app.label;
+      }
+
+      final selected = await showModalBottomSheet<Set<String>>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) {
+          final selectedPackages = Set<String>.from(_proxyPerAppPackages);
+          return StatefulBuilder(
+            builder: (context, setModalState) {
+              return SafeArea(
+                child: SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.78,
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 10),
+                      Container(
+                        width: 42,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.outlineVariant,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: Row(
+                          children: [
+                            Text(
+                              'Choose apps to tunnel',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const Spacer(),
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              child: const Text('Cancel'),
+                            ),
+                            const SizedBox(width: 4),
+                            FilledButton(
+                              onPressed: () => Navigator.of(context).pop(selectedPackages),
+                              child: const Text('Done'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: apps.length,
+                          itemBuilder: (context, index) {
+                            final app = apps[index];
+                            final checked = selectedPackages.contains(app.packageName);
+                            return CheckboxListTile(
+                              value: checked,
+                              title: Text(
+                                app.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                app.packageName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onChanged: (value) {
+                                setModalState(() {
+                                  if (value == true) {
+                                    selectedPackages.add(app.packageName);
+                                  } else {
+                                    selectedPackages.remove(app.packageName);
+                                  }
+                                });
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+
+      if (selected == null) {
+        return;
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      final sorted = selected.toList()..sort();
+      setState(() {
+        _proxyPerAppPackages = sorted;
+        _dirty = true;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingProxyPerAppApps = false;
+        });
+      }
+    }
+  }
+
   Future<bool> _applyEditsIfNeeded({bool showMessage = false}) async {
-    if (!_dirty) return true;
+    if (!_dirty) {
+      return _validateProxyPerAppSelection(showMessage: true);
+    }
     if (_isActive) return false;
     final valid = _formKey.currentState?.validate() ?? false;
     if (!valid) {
       _showMessage('Fix the fields before continuing');
+      return false;
+    }
+    if (!_validateProxyPerAppSelection(showMessage: true)) {
       return false;
     }
     final config = _buildConfigFromFields();
@@ -1284,8 +1452,12 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
     if (_encryptMode != 'none' && encryptKey == null) {
       return null;
     }
+    if (_isProxyPerAppMode && _proxyPerAppPackages.isEmpty) {
+      return null;
+    }
 
     final effectiveKey = _encryptMode == 'none' ? key : null;
+    final sortedProxyPerAppPackages = [..._proxyPerAppPackages]..sort();
 
     return TunnelConfig(
       serverHost: host,
@@ -1295,6 +1467,7 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
       mode: _mode,
       encryptMode: encryptMode,
       encryptKey: encryptKey,
+      proxyPerAppPackages: sortedProxyPerAppPackages,
     );
   }
 
@@ -1368,6 +1541,11 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
                 _dirty = true;
               });
             },
+            supportsProxyPerApp: Platform.isAndroid,
+            proxyPerAppPackages: _proxyPerAppPackages,
+            proxyPerAppPackageLabels: _proxyPerAppLabels,
+            loadingProxyPerAppApps: _loadingProxyPerAppApps,
+            onSelectProxyPerAppApps: _pickProxyPerAppApps,
             readOnly: _isActive,
             onSave: _saveEdits,
           ),
@@ -1534,6 +1712,11 @@ class _DetailsFormCard extends StatelessWidget {
     required this.onModeChanged,
     required this.encryptMode,
     required this.onEncryptModeChanged,
+    required this.supportsProxyPerApp,
+    required this.proxyPerAppPackages,
+    required this.proxyPerAppPackageLabels,
+    required this.loadingProxyPerAppApps,
+    required this.onSelectProxyPerAppApps,
     required this.readOnly,
     required this.onSave,
   });
@@ -1548,6 +1731,11 @@ class _DetailsFormCard extends StatelessWidget {
   final ValueChanged<TunnelMode> onModeChanged;
   final String encryptMode;
   final ValueChanged<String> onEncryptModeChanged;
+  final bool supportsProxyPerApp;
+  final List<String> proxyPerAppPackages;
+  final Map<String, String> proxyPerAppPackageLabels;
+  final bool loadingProxyPerAppApps;
+  final VoidCallback onSelectProxyPerAppApps;
   final bool readOnly;
   final VoidCallback onSave;
 
@@ -1604,9 +1792,66 @@ class _DetailsFormCard extends StatelessWidget {
                 items: const [
                   DropdownMenuItem(value: TunnelMode.proxy, child: Text('Proxy')),
                   DropdownMenuItem(value: TunnelMode.vpn, child: Text('VPN')),
+                  DropdownMenuItem(
+                    value: TunnelMode.proxyPerApp,
+                    child: Text('Proxy per app (Android)'),
+                  ),
                 ],
                 onChanged: readOnly ? null : (value) => onModeChanged(value ?? mode),
               ),
+              if (mode == TunnelMode.proxyPerApp) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        proxyPerAppPackages.isEmpty
+                            ? 'No apps selected'
+                            : '${proxyPerAppPackages.length} apps selected',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: (!supportsProxyPerApp || readOnly || loadingProxyPerAppApps)
+                          ? null
+                          : onSelectProxyPerAppApps,
+                      icon: Icon(loadingProxyPerAppApps ? Icons.hourglass_top : Icons.apps),
+                      label: Text(loadingProxyPerAppApps ? 'Loading...' : 'Select apps'),
+                    ),
+                  ],
+                ),
+                if (!supportsProxyPerApp) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Proxy per app selection is available on Android only.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+                if (proxyPerAppPackages.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final packageName in proxyPerAppPackages.take(8))
+                        Chip(
+                          visualDensity: VisualDensity.compact,
+                          label: Text(
+                            proxyPerAppPackageLabels[packageName] ?? packageName,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      if (proxyPerAppPackages.length > 8)
+                        Chip(
+                          visualDensity: VisualDensity.compact,
+                          label: Text('+${proxyPerAppPackages.length - 8} more'),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
               const SizedBox(height: 12),
               TextFormField(
                 controller: keyController,

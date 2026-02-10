@@ -100,6 +100,8 @@ class PingtunnelVpnService : VpnService() {
             .addAddress("198.18.0.1", 15)
             .addRoute("0.0.0.0", 0)
 
+        val isProxyPerAppMode = config.mode.equals("proxy_per_app", ignoreCase = true)
+
         if (!config.dns.isNullOrBlank()) {
             config.dns.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach {
                 builder.addDnsServer(it)
@@ -109,9 +111,33 @@ class PingtunnelVpnService : VpnService() {
             builder.addDnsServer("8.8.8.8")
         }
 
-        try {
-            builder.addDisallowedApplication(packageName)
-        } catch (_: Exception) {
+        if (isProxyPerAppMode) {
+            val selectedPackages = config.proxyPerAppPackages
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && it != packageName }
+                .distinct()
+
+            if (selectedPackages.isEmpty()) {
+                throw IllegalArgumentException("Select at least one app for Proxy per app mode")
+            }
+
+            var allowedCount = 0
+            for (appPackage in selectedPackages) {
+                try {
+                    builder.addAllowedApplication(appPackage)
+                    allowedCount += 1
+                } catch (e: Exception) {
+                    Log.w("PingtunnelVPN", "Failed to allow package $appPackage", e)
+                }
+            }
+            if (allowedCount == 0) {
+                throw IllegalArgumentException("None of the selected apps are available")
+            }
+        } else {
+            try {
+                builder.addDisallowedApplication(packageName)
+            } catch (_: Exception) {
+            }
         }
 
         tunParcel = builder.establish()
@@ -181,9 +207,10 @@ class PingtunnelVpnService : VpnService() {
             2002
         )
         val serverHost = config?.serverHost?.takeIf { it.isNotBlank() } ?: "active tunnel"
+        val isProxyPerAppMode = config?.mode?.equals("proxy_per_app", ignoreCase = true) == true
         val notification = ServiceNotifications.createForegroundNotification(
             this,
-            "Pingtunnel VPN",
+            if (isProxyPerAppMode) "Pingtunnel Proxy per app" else "Pingtunnel VPN",
             "Connected to $serverHost",
             disconnectIntent,
             restoreIntent

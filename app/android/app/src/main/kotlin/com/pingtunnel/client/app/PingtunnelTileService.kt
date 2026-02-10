@@ -35,7 +35,7 @@ class PingtunnelTileService : TileService() {
         }
 
         val mode = config.mode.lowercase()
-        if (mode == "vpn") {
+        if (mode == "vpn" || mode == "proxy_per_app") {
             val prepareIntent = VpnService.prepare(this)
             if (prepareIntent != null) {
                 openApp()
@@ -117,6 +117,10 @@ class PingtunnelTileService : TileService() {
         config.interfaceName?.let { putExtra(Constants.EXTRA_IFACE, it) }
         config.tunDevice?.let { putExtra(Constants.EXTRA_TUN, it) }
         config.dns?.let { putExtra(Constants.EXTRA_DNS, it) }
+        putStringArrayListExtra(
+            Constants.EXTRA_PROXY_PER_APP_PACKAGES,
+            ArrayList(config.proxyPerAppPackages)
+        )
     }
 
     companion object {

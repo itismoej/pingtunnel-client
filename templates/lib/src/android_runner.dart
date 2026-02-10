@@ -2,6 +2,13 @@ import 'package:flutter/services.dart';
 
 import 'config.dart';
 
+class AndroidAppInfo {
+  AndroidAppInfo({required this.packageName, required this.label});
+
+  final String packageName;
+  final String label;
+}
+
 class AndroidRunner {
   static const MethodChannel _channel = MethodChannel('pingtunnel');
 
@@ -25,5 +32,22 @@ class AndroidRunner {
   Future<bool> isRunning() async {
     final result = await _channel.invokeMethod<bool>('isRunning');
     return result ?? false;
+  }
+
+  Future<List<AndroidAppInfo>> listLaunchableApps() async {
+    final raw = await _channel.invokeMethod<List<dynamic>>('listLaunchableApps');
+    if (raw == null) {
+      return <AndroidAppInfo>[];
+    }
+
+    final apps = <AndroidAppInfo>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final packageName = item['packageName']?.toString() ?? '';
+      final label = item['label']?.toString() ?? packageName;
+      if (packageName.isEmpty) continue;
+      apps.add(AndroidAppInfo(packageName: packageName, label: label));
+    }
+    return apps;
   }
 }

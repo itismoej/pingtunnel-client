@@ -17,4 +17,5 @@ object Constants {
     const val EXTRA_IFACE = "interfaceName"
     const val EXTRA_TUN = "tunDevice"
     const val EXTRA_DNS = "dns"
+    const val EXTRA_PROXY_PER_APP_PACKAGES = "proxyPerAppPackages"
 }

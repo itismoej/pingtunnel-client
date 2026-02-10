@@ -23,6 +23,10 @@ object LastTunnelConfigStore {
             .putString(Constants.EXTRA_IFACE, config.interfaceName)
             .putString(Constants.EXTRA_TUN, config.tunDevice)
             .putString(Constants.EXTRA_DNS, config.dns)
+            .putStringSet(
+                Constants.EXTRA_PROXY_PER_APP_PACKAGES,
+                config.proxyPerAppPackages.toSet()
+            )
             .apply()
     }
 
@@ -45,6 +49,12 @@ object LastTunnelConfigStore {
         val iface = prefs.getString(Constants.EXTRA_IFACE, null)
         val tun = prefs.getString(Constants.EXTRA_TUN, null)
         val dns = prefs.getString(Constants.EXTRA_DNS, null)
+        val proxyPerAppPackages = prefs
+            .getStringSet(Constants.EXTRA_PROXY_PER_APP_PACKAGES, emptySet())
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.distinct()
+            ?: emptyList()
 
         if (encryptMode.isNullOrBlank() && key == null) {
             return null
@@ -60,7 +70,8 @@ object LastTunnelConfigStore {
             encryptKey = encryptKey,
             interfaceName = iface,
             tunDevice = tun,
-            dns = dns
+            dns = dns,
+            proxyPerAppPackages = proxyPerAppPackages
         )
     }
 }

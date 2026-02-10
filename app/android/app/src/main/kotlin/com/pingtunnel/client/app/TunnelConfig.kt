@@ -13,7 +13,8 @@ data class TunnelConfig(
     val encryptKey: String?,
     val interfaceName: String?,
     val tunDevice: String?,
-    val dns: String?
+    val dns: String?,
+    val proxyPerAppPackages: List<String>
 ) {
     fun serverAddress(): String {
         return if (serverPort == null) serverHost else "$serverHost:$serverPort"
@@ -32,6 +33,11 @@ data class TunnelConfig(
             val iface = map[Constants.EXTRA_IFACE] as? String
             val tun = map[Constants.EXTRA_TUN] as? String
             val dns = map[Constants.EXTRA_DNS] as? String
+            val proxyPerAppPackages = (map[Constants.EXTRA_PROXY_PER_APP_PACKAGES] as? List<*>)
+                ?.mapNotNull { it?.toString()?.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.distinct()
+                ?: emptyList()
 
             if (encryptMode.isNullOrBlank() && key == null) {
                 throw IllegalArgumentException("key missing")
@@ -47,7 +53,8 @@ data class TunnelConfig(
                 encryptKey = encryptKey,
                 interfaceName = iface,
                 tunDevice = tun,
-                dns = dns
+                dns = dns,
+                proxyPerAppPackages = proxyPerAppPackages
             )
         }
 
@@ -71,6 +78,12 @@ data class TunnelConfig(
             val iface = intent.getStringExtra(Constants.EXTRA_IFACE)
             val tun = intent.getStringExtra(Constants.EXTRA_TUN)
             val dns = intent.getStringExtra(Constants.EXTRA_DNS)
+            val proxyPerAppPackages = intent
+                .getStringArrayListExtra(Constants.EXTRA_PROXY_PER_APP_PACKAGES)
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.distinct()
+                ?: emptyList()
 
             if (encryptMode.isNullOrBlank() && key == null) {
                 throw IllegalArgumentException("key missing")
@@ -86,7 +99,8 @@ data class TunnelConfig(
                 encryptKey = encryptKey,
                 interfaceName = iface,
                 tunDevice = tun,
-                dns = dns
+                dns = dns,
+                proxyPerAppPackages = proxyPerAppPackages
             )
         }
     }
