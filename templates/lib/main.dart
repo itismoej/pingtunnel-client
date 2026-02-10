@@ -1123,7 +1123,6 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
   late TunnelMode _mode;
   late String _encryptMode;
   late List<String> _proxyPerAppPackages;
-  final Map<String, String> _proxyPerAppLabels = <String, String>{};
   bool _loadingProxyPerAppApps = false;
 
   @override
@@ -1141,9 +1140,6 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
     _encryptKeyController = TextEditingController(text: _entry.config.encryptKey ?? '');
     _encryptMode = _entry.config.encryptMode ?? 'none';
     _proxyPerAppPackages = [..._entry.config.proxyPerAppPackages]..sort();
-    for (final packageName in _proxyPerAppPackages) {
-      _proxyPerAppLabels[packageName] = packageName;
-    }
     _hostController.addListener(_markDirty);
     _keyController.addListener(_markDirty);
     _localPortController.addListener(_markDirty);
@@ -1212,17 +1208,22 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
         return;
       }
 
-      for (final app in apps) {
-        _proxyPerAppLabels[app.packageName] = app.label;
-      }
-
       final selected = await showModalBottomSheet<Set<String>>(
         context: context,
         isScrollControlled: true,
         builder: (context) {
           final selectedPackages = Set<String>.from(_proxyPerAppPackages);
+          var searchQuery = '';
           return StatefulBuilder(
             builder: (context, setModalState) {
+              final normalizedQuery = searchQuery.trim().toLowerCase();
+              final filteredApps = normalizedQuery.isEmpty
+                  ? apps
+                  : apps.where((app) {
+                      final label = app.label.toLowerCase();
+                      return label.contains(normalizedQuery);
+                    }).toList(growable: false);
+
               return SafeArea(
                 child: SizedBox(
                   height: MediaQuery.of(context).size.height * 0.78,
@@ -1259,36 +1260,71 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
                         ),
                       ),
                       const Divider(height: 1),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: apps.length,
-                          itemBuilder: (context, index) {
-                            final app = apps[index];
-                            final checked = selectedPackages.contains(app.packageName);
-                            return CheckboxListTile(
-                              value: checked,
-                              title: Text(
-                                app.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                app.packageName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              onChanged: (value) {
-                                setModalState(() {
-                                  if (value == true) {
-                                    selectedPackages.add(app.packageName);
-                                  } else {
-                                    selectedPackages.remove(app.packageName);
-                                  }
-                                });
-                              },
-                            );
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: TextField(
+                          decoration: const InputDecoration(
+                            hintText: 'Search apps',
+                            prefixIcon: Icon(Icons.search),
+                          ),
+                          onChanged: (value) {
+                            setModalState(() {
+                              searchQuery = value;
+                            });
                           },
                         ),
+                      ),
+                      Expanded(
+                        child: filteredApps.isEmpty
+                            ? Center(
+                                child: Text(
+                                  'No apps found',
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              )
+                            : ListView.builder(
+                                itemCount: filteredApps.length,
+                                itemBuilder: (context, index) {
+                                  final app = filteredApps[index];
+                                  final checked = selectedPackages.contains(app.packageName);
+                                  return ListTile(
+                                    onTap: () {
+                                      setModalState(() {
+                                        if (checked) {
+                                          selectedPackages.remove(app.packageName);
+                                        } else {
+                                          selectedPackages.add(app.packageName);
+                                        }
+                                      });
+                                    },
+                                    leading: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: app.iconPng != null
+                                          ? Image.memory(
+                                              app.iconPng!,
+                                              width: 28,
+                                              height: 28,
+                                              fit: BoxFit.cover,
+                                              filterQuality: FilterQuality.low,
+                                              errorBuilder: (_, _, _) =>
+                                                  const Icon(Icons.apps, size: 22),
+                                            )
+                                          : const Icon(Icons.apps, size: 22),
+                                    ),
+                                    title: Text(
+                                      app.label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    trailing: checked
+                                        ? Icon(
+                                            Icons.check_circle,
+                                            color: Theme.of(context).colorScheme.primary,
+                                          )
+                                        : null,
+                                  );
+                                },
+                              ),
                       ),
                     ],
                   ),
@@ -1543,7 +1579,6 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
             },
             supportsProxyPerApp: Platform.isAndroid,
             proxyPerAppPackages: _proxyPerAppPackages,
-            proxyPerAppPackageLabels: _proxyPerAppLabels,
             loadingProxyPerAppApps: _loadingProxyPerAppApps,
             onSelectProxyPerAppApps: _pickProxyPerAppApps,
             readOnly: _isActive,
@@ -1714,7 +1749,6 @@ class _DetailsFormCard extends StatelessWidget {
     required this.onEncryptModeChanged,
     required this.supportsProxyPerApp,
     required this.proxyPerAppPackages,
-    required this.proxyPerAppPackageLabels,
     required this.loadingProxyPerAppApps,
     required this.onSelectProxyPerAppApps,
     required this.readOnly,
@@ -1733,7 +1767,6 @@ class _DetailsFormCard extends StatelessWidget {
   final ValueChanged<String> onEncryptModeChanged;
   final bool supportsProxyPerApp;
   final List<String> proxyPerAppPackages;
-  final Map<String, String> proxyPerAppPackageLabels;
   final bool loadingProxyPerAppApps;
   final VoidCallback onSelectProxyPerAppApps;
   final bool readOnly;
@@ -1831,24 +1864,11 @@ class _DetailsFormCard extends StatelessWidget {
                 ],
                 if (proxyPerAppPackages.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final packageName in proxyPerAppPackages.take(8))
-                        Chip(
-                          visualDensity: VisualDensity.compact,
-                          label: Text(
-                            proxyPerAppPackageLabels[packageName] ?? packageName,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      if (proxyPerAppPackages.length > 8)
-                        Chip(
-                          visualDensity: VisualDensity.compact,
-                          label: Text('+${proxyPerAppPackages.length - 8} more'),
-                        ),
-                    ],
+                  Text(
+                    'Open picker to review selected apps.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                    ),
                   ),
                 ],
               ],

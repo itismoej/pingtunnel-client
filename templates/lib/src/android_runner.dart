@@ -3,10 +3,11 @@ import 'package:flutter/services.dart';
 import 'config.dart';
 
 class AndroidAppInfo {
-  AndroidAppInfo({required this.packageName, required this.label});
+  AndroidAppInfo({required this.packageName, required this.label, this.iconPng});
 
   final String packageName;
   final String label;
+  final Uint8List? iconPng;
 }
 
 class AndroidRunner {
@@ -45,8 +46,15 @@ class AndroidRunner {
       if (item is! Map) continue;
       final packageName = item['packageName']?.toString() ?? '';
       final label = item['label']?.toString() ?? packageName;
+      final rawIcon = item['iconPng'];
+      Uint8List? iconPng;
+      if (rawIcon is Uint8List) {
+        iconPng = rawIcon;
+      } else if (rawIcon is List<int>) {
+        iconPng = Uint8List.fromList(rawIcon);
+      }
       if (packageName.isEmpty) continue;
-      apps.add(AndroidAppInfo(packageName: packageName, label: label));
+      apps.add(AndroidAppInfo(packageName: packageName, label: label, iconPng: iconPng));
     }
     return apps;
   }

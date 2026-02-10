@@ -4,6 +4,9 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
@@ -12,6 +15,8 @@ import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
+import kotlin.math.max
 
 class MainActivity : FlutterActivity() {
     private var pendingResult: MethodChannel.Result? = null
@@ -115,11 +120,11 @@ class MainActivity : FlutterActivity() {
         ServiceState.notifyStateChanged(this)
     }
 
-    private fun listLaunchableApps(): List<Map<String, String>> {
+    private fun listLaunchableApps(): List<Map<String, Any?>> {
         val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
-        val seen = LinkedHashMap<String, String>()
+        val seen = LinkedHashMap<String, android.content.pm.ResolveInfo>()
         val resolves = packageManager.queryIntentActivities(launcherIntent, 0)
         for (resolveInfo in resolves) {
             val activityInfo = resolveInfo.activityInfo ?: continue
@@ -130,17 +135,66 @@ class MainActivity : FlutterActivity() {
             if (seen.containsKey(appPackage)) {
                 continue
             }
-            val label = resolveInfo.loadLabel(packageManager)?.toString()?.trim().orEmpty()
-            seen[appPackage] = if (label.isEmpty()) appPackage else label
+            seen[appPackage] = resolveInfo
         }
-        return seen.entries
+        return seen.values
             .sortedWith(
-                compareBy<Map.Entry<String, String>>(
-                    { it.value.lowercase() },
-                    { it.key.lowercase() }
+                compareBy<android.content.pm.ResolveInfo>(
+                    {
+                        resolveInfoLabel(it).ifEmpty {
+                            it.activityInfo?.packageName.orEmpty()
+                        }.lowercase()
+                    },
+                    { it.activityInfo?.packageName.orEmpty().lowercase() }
                 )
             )
-            .map { mapOf("packageName" to it.key, "label" to it.value) }
+            .map { resolveInfo ->
+                val appPackage = resolveInfo.activityInfo?.packageName.orEmpty()
+                val label = resolveInfoLabel(resolveInfo).ifEmpty { appPackage }
+                mapOf(
+                    "packageName" to appPackage,
+                    "label" to label,
+                    "iconPng" to renderAppIconPng(resolveInfo)
+                )
+            }
+    }
+
+    private fun resolveInfoLabel(resolveInfo: android.content.pm.ResolveInfo): String {
+        return resolveInfo.loadLabel(packageManager)?.toString()?.trim().orEmpty()
+    }
+
+    private fun renderAppIconPng(resolveInfo: android.content.pm.ResolveInfo): ByteArray? {
+        return try {
+            val drawable = resolveInfo.loadIcon(packageManager) ?: return null
+            val baseBitmap = when (drawable) {
+                is BitmapDrawable -> drawable.bitmap
+                else -> {
+                    val width = max(1, if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 96)
+                    val height = max(1, if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 96)
+                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bitmap)
+                    drawable.setBounds(0, 0, canvas.width, canvas.height)
+                    drawable.draw(canvas)
+                    bitmap
+                }
+            }
+
+            val targetSize = 64
+            val bitmap = if (baseBitmap.width != targetSize || baseBitmap.height != targetSize) {
+                Bitmap.createScaledBitmap(baseBitmap, targetSize, targetSize, true)
+            } else {
+                baseBitmap
+            }
+
+            val output = ByteArrayOutputStream()
+            val ok = bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+            if (bitmap !== baseBitmap) {
+                bitmap.recycle()
+            }
+            if (!ok) null else output.toByteArray()
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun Intent.putExtras(config: TunnelConfig) {
