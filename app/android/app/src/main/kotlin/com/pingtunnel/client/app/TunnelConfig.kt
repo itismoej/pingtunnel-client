@@ -20,6 +20,16 @@ data class TunnelConfig(
         return if (serverPort == null) serverHost else "$serverHost:$serverPort"
     }
 
+    fun localProxyBackendSocksPort(): Int {
+        if (localSocksPort < 1 || localSocksPort > 65535) {
+            return 1081
+        }
+        if (localSocksPort == 65535) {
+            return 65534
+        }
+        return localSocksPort + 1
+    }
+
     companion object {
         fun fromMap(map: Map<*, *>): TunnelConfig {
             val host = map[Constants.EXTRA_SERVER_HOST] as? String

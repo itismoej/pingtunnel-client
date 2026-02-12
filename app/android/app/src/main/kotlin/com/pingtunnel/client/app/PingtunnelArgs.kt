@@ -1,12 +1,16 @@
 package com.pingtunnel.client.app
 
-fun buildPingtunnelArgs(binPath: String, config: TunnelConfig): List<String> {
+fun buildPingtunnelArgs(
+    binPath: String,
+    config: TunnelConfig,
+    localSocksPort: Int = config.localSocksPort
+): List<String> {
     val args = mutableListOf(
         binPath,
         "-type",
         "client",
         "-l",
-        ":${config.localSocksPort}",
+        ":$localSocksPort",
         "-s",
         config.serverAddress(),
         "-sock5",

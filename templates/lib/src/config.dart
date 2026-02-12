@@ -51,8 +51,9 @@ class TunnelConfig {
       interfaceName: interfaceName ?? this.interfaceName,
       tunDevice: tunDevice ?? this.tunDevice,
       dns: dns ?? this.dns,
-      proxyPerAppPackages:
-          proxyPerAppPackages != null ? List<String>.from(proxyPerAppPackages) : this.proxyPerAppPackages,
+      proxyPerAppPackages: proxyPerAppPackages != null
+          ? List<String>.from(proxyPerAppPackages)
+          : this.proxyPerAppPackages,
     );
   }
 
@@ -61,6 +62,16 @@ class TunnelConfig {
       return serverHost;
     }
     return "$serverHost:$serverPort";
+  }
+
+  int localProxyBackendSocksPort() {
+    if (localSocksPort < 1 || localSocksPort > 65535) {
+      return 1081;
+    }
+    if (localSocksPort == 65535) {
+      return 65534;
+    }
+    return localSocksPort + 1;
   }
 
   Map<String, Object?> toMap() {
@@ -101,31 +112,42 @@ class TunnelConfig {
     final keyText = params['key'] ?? '';
     final key = keyText.isEmpty ? null : int.tryParse(keyText);
 
-    final localPort = int.tryParse(params['lport'] ?? params['local_port'] ?? '') ?? 1080;
-    final serverPort = int.tryParse(params['port'] ?? params['server_port'] ?? '');
+    final localPort =
+        int.tryParse(params['lport'] ?? params['local_port'] ?? '') ?? 1080;
+    final serverPort = int.tryParse(
+      params['port'] ?? params['server_port'] ?? '',
+    );
 
-    final modeValue = (params['mode'] ?? params['vpn'] ?? 'proxy').toLowerCase();
+    final modeValue = (params['mode'] ?? params['vpn'] ?? 'proxy')
+        .toLowerCase();
     final mode = switch (modeValue) {
       'vpn' || '1' => TunnelMode.vpn,
-      'proxy_per_app' || 'proxy-per-app' || 'per_app' || 'app' || 'app_proxy' => TunnelMode.proxyPerApp,
+      'proxy_per_app' ||
+      'proxy-per-app' ||
+      'per_app' ||
+      'app' ||
+      'app_proxy' => TunnelMode.proxyPerApp,
       _ => TunnelMode.proxy,
     };
-    final proxyPerAppPackages = (params['apps'] ?? '')
-        .split(',')
-        .map((value) => value.trim())
-        .where((value) => value.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
+    final proxyPerAppPackages =
+        (params['apps'] ?? '')
+            .split(',')
+            .map((value) => value.trim())
+            .where((value) => value.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
 
-    final encryptValue = (params['encrypt'] ??
-            params['encrypt_mode'] ??
-            params['encryptMode'] ??
-            params['enc'] ??
-            '')
-        .toLowerCase();
+    final encryptValue =
+        (params['encrypt'] ??
+                params['encrypt_mode'] ??
+                params['encryptMode'] ??
+                params['enc'] ??
+                '')
+            .toLowerCase();
     final validEncryptModes = {'aes128', 'aes256', 'chacha20'};
-    final encryptMode = encryptValue.isEmpty ||
+    final encryptMode =
+        encryptValue.isEmpty ||
             encryptValue == '0' ||
             encryptValue == 'none' ||
             !validEncryptModes.contains(encryptValue)

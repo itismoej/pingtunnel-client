@@ -1033,6 +1033,10 @@ class _ConnectionTile extends StatelessWidget {
       ..write('  •  ')
       ..write('Local ${entry.config.localSocksPort}');
 
+    if (entry.config.mode == TunnelMode.proxy) {
+      subtitle.write(' (SOCKS5+HTTP)');
+    }
+
     final borderColor = isSelected
         ? Theme.of(context).colorScheme.primary
         : Theme.of(context).colorScheme.outlineVariant;
@@ -1902,8 +1906,9 @@ class _DetailsFormCard extends StatelessWidget {
                   final text = value?.trim() ?? '';
                   if (text.isEmpty) return 'Host is required';
                   if (text.contains('://')) return 'Host only, no scheme';
-                  if (text.contains('/') || text.contains(' '))
+                  if (text.contains('/') || text.contains(' ')) {
                     return 'Invalid host';
+                  }
                   if (text.contains(':')) return 'Host must not include port';
                   return null;
                 },

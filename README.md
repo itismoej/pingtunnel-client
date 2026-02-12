@@ -64,6 +64,9 @@ pingtunnel://example.com?encrypt=aes256&encrypt_key=encryption-key-here&mode=pro
 - **Proxy**: only apps using the local SOCKS proxy are tunneled.
 - **VPN**: routes system traffic through the tunnel.
 
+In Proxy mode (Android and desktop), the client exposes one mixed local proxy port:
+- SOCKS5 and HTTP on `127.0.0.1:<local port>`
+
 ### Encryption
 - If **Encryption** is **Off**: provide the **Key**.
 - If **Encryption** is **On**: provide the **Encrypt Key**.

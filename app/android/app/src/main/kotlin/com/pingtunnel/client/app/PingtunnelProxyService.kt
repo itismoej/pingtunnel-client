@@ -9,6 +9,7 @@ import android.util.Log
 
 class PingtunnelProxyService : Service() {
     private var pingtunnelProcess: Process? = null
+    private var mixedProxy: HttpToSocksProxy? = null
     private var currentConfig: TunnelConfig? = null
     private lateinit var installer: BinaryInstaller
 
@@ -29,6 +30,8 @@ class PingtunnelProxyService : Service() {
         if (action == Constants.ACTION_STOP) {
             ProcessUtils.stopProcess(pingtunnelProcess)
             pingtunnelProcess = null
+            mixedProxy?.stop()
+            mixedProxy = null
             currentConfig = null
             ServiceState.proxyRunning = false
             ServiceState.notifyStateChanged(this)
@@ -54,7 +57,10 @@ class PingtunnelProxyService : Service() {
         startOrUpdateForeground(config)
 
         try {
-            pingtunnelProcess = startPingtunnel(config)
+            val backendSocksPort = config.localProxyBackendSocksPort()
+            pingtunnelProcess = startPingtunnel(config, localSocksPort = backendSocksPort)
+            mixedProxy = HttpToSocksProxy()
+            mixedProxy?.start(listenPort = config.localSocksPort, socksPort = backendSocksPort)
             ServiceState.proxyRunning = true
             ServiceState.vpnRunning = false
             ServiceState.notifyStateChanged(this)
@@ -71,6 +77,8 @@ class PingtunnelProxyService : Service() {
     override fun onDestroy() {
         ProcessUtils.stopProcess(pingtunnelProcess)
         pingtunnelProcess = null
+        mixedProxy?.stop()
+        mixedProxy = null
         currentConfig = null
         ServiceState.proxyRunning = false
         ServiceState.notifyStateChanged(this)
@@ -84,9 +92,9 @@ class PingtunnelProxyService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun startPingtunnel(config: TunnelConfig): Process {
+    private fun startPingtunnel(config: TunnelConfig, localSocksPort: Int): Process {
         val bin = installer.ensureBinary("pingtunnel")
-        val args = buildPingtunnelArgs(bin.absolutePath, config)
+        val args = buildPingtunnelArgs(bin.absolutePath, config, localSocksPort = localSocksPort)
         return ProcessUtils.startProcess("pingtunnel", args, filesDir)
     }
 
@@ -104,10 +112,11 @@ class PingtunnelProxyService : Service() {
             1002
         )
         val serverHost = config?.serverHost?.takeIf { it.isNotBlank() } ?: "active tunnel"
+        val proxyPorts = config?.let { "SOCKS/HTTP ${it.localSocksPort}" }
         val notification = ServiceNotifications.createForegroundNotification(
             this,
             "Pingtunnel Proxy",
-            "Connected to $serverHost",
+            if (proxyPorts == null) "Connected to $serverHost" else "Connected to $serverHost ($proxyPorts)",
             disconnectIntent,
             restoreIntent
         )

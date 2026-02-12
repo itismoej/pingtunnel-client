@@ -10,9 +10,7 @@ import 'socks5_probe.dart';
 enum TunnelStatus { disconnected, connecting, connected, error }
 
 class TunnelController {
-  TunnelController()
-      : logBuffer = LogBuffer(),
-        assets = AssetManager() {
+  TunnelController() : logBuffer = LogBuffer(), assets = AssetManager() {
     _desktopRunner = DesktopRunner(assets: assets, logBuffer: logBuffer);
     _androidRunner = AndroidRunner();
   }
@@ -26,7 +24,8 @@ class TunnelController {
   String? lastError;
 
   Future<String> testConnection(TunnelConfig config) async {
-    if (config.mode == TunnelMode.vpn || config.mode == TunnelMode.proxyPerApp) {
+    if (config.mode == TunnelMode.vpn ||
+        config.mode == TunnelMode.proxyPerApp) {
       final socksProbe = Socks5Probe();
       logBuffer.add('[test] VPN mode: checking tunnel core via SOCKS5...');
       try {
@@ -60,8 +59,7 @@ class TunnelController {
     try {
       final runtimeConfig = await _resolveServerHost(config);
       if (Platform.isAndroid) {
-        if (
-            runtimeConfig.mode == TunnelMode.vpn ||
+        if (runtimeConfig.mode == TunnelMode.vpn ||
             runtimeConfig.mode == TunnelMode.proxyPerApp) {
           final ok = await _androidRunner.prepareVpn();
           if (!ok) {
@@ -77,6 +75,12 @@ class TunnelController {
         } else {
           await _desktopRunner.startVpn(runtimeConfig);
         }
+      }
+
+      if (runtimeConfig.mode == TunnelMode.proxy) {
+        logBuffer.add(
+          '[proxy] Mixed SOCKS5/HTTP: 127.0.0.1:${runtimeConfig.localSocksPort}',
+        );
       }
 
       status = TunnelStatus.connected;

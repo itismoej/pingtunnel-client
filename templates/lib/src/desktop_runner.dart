@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'asset_manager.dart';
 import 'config.dart';
+import 'http_to_socks_proxy.dart';
 import 'log_buffer.dart';
 
 class PlatformInfo {
@@ -28,22 +29,35 @@ class DesktopRunner {
 
   Process? _pingtunnel;
   Process? _tun2socks;
+  HttpToSocksProxy? _httpProxy;
   PlatformInfo? _platform;
   TunnelMode? _activeMode;
 
   Future<void> startProxy(TunnelConfig config) async {
     _platform ??= await _detectPlatform();
-    final pingtunnel = await _startPingtunnel(config);
+    final backendSocksPort = config.localProxyBackendSocksPort();
+    final pingtunnel = await _startPingtunnel(
+      config,
+      localSocksPort: backendSocksPort,
+    );
     _pingtunnel = pingtunnel;
+    final httpProxy = HttpToSocksProxy(logBuffer: logBuffer);
     try {
       await _waitForSocksReady(
         pingtunnel,
-        config.localSocksPort,
+        backendSocksPort,
         platform: _platform!,
       );
+      await httpProxy.start(
+        listenPort: config.localSocksPort,
+        socksPort: backendSocksPort,
+      );
+      _httpProxy = httpProxy;
     } catch (_) {
+      await httpProxy.stop();
       await _stopProcess(_pingtunnel);
       _pingtunnel = null;
+      _httpProxy = null;
       rethrow;
     }
     _activeMode = TunnelMode.proxy;
@@ -55,7 +69,10 @@ class DesktopRunner {
     bool vpnUpApplied = false;
 
     try {
-      final pingtunnel = await _startPingtunnel(config);
+      final pingtunnel = await _startPingtunnel(
+        config,
+        localSocksPort: config.localSocksPort,
+      );
       _pingtunnel = pingtunnel;
       await _waitForSocksReady(
         pingtunnel,
@@ -65,7 +82,9 @@ class DesktopRunner {
 
       final iface = config.interfaceName ?? await _detectInterface(platform);
       if (iface == null) {
-        throw StateError('Failed to detect outbound interface. Provide ?iface=...');
+        throw StateError(
+          'Failed to detect outbound interface. Provide ?iface=...',
+        );
       }
 
       final tunDevice = config.tunDevice ?? _defaultTunDevice(platform);
@@ -98,14 +117,19 @@ class DesktopRunner {
       }
       await _stopProcess(_tun2socks);
       await _stopProcess(_pingtunnel);
+      await _httpProxy?.stop();
       _tun2socks = null;
       _pingtunnel = null;
+      _httpProxy = null;
       _activeMode = null;
       rethrow;
     }
   }
 
   Future<void> stop() async {
+    await _httpProxy?.stop();
+    _httpProxy = null;
+
     final platform = _platform;
     if (platform != null) {
       if (_activeMode == TunnelMode.vpn) {
@@ -131,13 +155,12 @@ class DesktopRunner {
     _activeMode = null;
   }
 
-  Future<Process> _startPingtunnel(TunnelConfig config) async {
+  Future<Process> _startPingtunnel(
+    TunnelConfig config, {
+    required int localSocksPort,
+  }) async {
     final platform = _platform!;
-    final bin = await _resolveBinary(
-      'pingtunnel',
-      platform,
-      config,
-    );
+    final bin = await _resolveBinary('pingtunnel', platform, config);
     if (platform.isLinux) {
       await _warnIfMissingNetRaw(bin);
     }
@@ -146,7 +169,7 @@ class DesktopRunner {
       '-type',
       'client',
       '-l',
-      ':${config.localSocksPort}',
+      ':$localSocksPort',
       '-s',
       config.serverAddress(),
       '-sock5',
@@ -203,7 +226,8 @@ class DesktopRunner {
       }
     }
 
-    final assetPath = 'assets/binaries/$name/${platform.os}-${platform.arch}/$name$ext';
+    final assetPath =
+        'assets/binaries/$name/${platform.os}-${platform.arch}/$name$ext';
     final outputPath = 'bin/$name/${platform.os}-${platform.arch}/$name$ext';
     return assets.installAsset(assetPath, outputPath, executable: true);
   }
@@ -280,8 +304,11 @@ class DesktopRunner {
     }
   }
 
-  Future<void> _runCommand(String command, List<String> args,
-      {required String label}) async {
+  Future<void> _runCommand(
+    String command,
+    List<String> args, {
+    required String label,
+  }) async {
     final result = await Process.run(command, args);
     if (result.stdout != null && result.stdout.toString().trim().isNotEmpty) {
       logBuffer.add('[$label] ${result.stdout.toString().trim()}');
@@ -314,7 +341,11 @@ class DesktopRunner {
       if (helper != null) {
         final action = scriptName == 'vpn_up' ? 'up' : 'down';
         logBuffer.add('[vpn] Using polkit helper for $scriptName');
-        await _runCommand('pkexec', [helper, action, ...args], label: scriptName);
+        await _runCommand('pkexec', [
+          helper,
+          action,
+          ...args,
+        ], label: scriptName);
         return;
       }
     }
@@ -412,8 +443,10 @@ class DesktopRunner {
     final deadline = DateTime.now().add(const Duration(seconds: 4));
 
     while (DateTime.now().isBefore(deadline)) {
-      final exitCode = await process.exitCode
-          .timeout(Duration.zero, onTimeout: () => -1);
+      final exitCode = await process.exitCode.timeout(
+        Duration.zero,
+        onTimeout: () => -1,
+      );
       if (exitCode >= 0) {
         throw StateError(_pingtunnelStartFailureMessage(platform));
       }
@@ -445,8 +478,11 @@ class DesktopRunner {
     return 'pingtunnel exited before startup. Check configuration and logs.';
   }
 
-  Future<Process> _startProcess(String bin, List<String> args,
-      {required String label}) async {
+  Future<Process> _startProcess(
+    String bin,
+    List<String> args, {
+    required String label,
+  }) async {
     logBuffer.add('Starting $label: $bin ${args.join(' ')}');
     final process = await Process.start(bin, args);
     process.stdout.transform(utf8.decoder).listen((data) {
@@ -465,20 +501,23 @@ class DesktopRunner {
   Future<void> _stopProcess(Process? process) async {
     if (process == null) return;
     process.kill(ProcessSignal.sigterm);
-    await process.exitCode.timeout(const Duration(seconds: 3), onTimeout: () {
-      process.kill(ProcessSignal.sigkill);
-      return process.exitCode;
-    });
+    await process.exitCode.timeout(
+      const Duration(seconds: 3),
+      onTimeout: () {
+        process.kill(ProcessSignal.sigkill);
+        return process.exitCode;
+      },
+    );
   }
 
   Future<PlatformInfo> _detectPlatform() async {
     final os = Platform.isWindows
         ? 'windows'
         : Platform.isMacOS
-            ? 'macos'
-            : Platform.isLinux
-                ? 'linux'
-                : 'unknown';
+        ? 'macos'
+        : Platform.isLinux
+        ? 'linux'
+        : 'unknown';
 
     final arch = await _detectArch();
     return PlatformInfo(os: os, arch: arch);
@@ -486,10 +525,11 @@ class DesktopRunner {
 
   Future<String> _detectArch() async {
     if (Platform.isWindows) {
-      final arch = (Platform.environment['PROCESSOR_ARCHITECTURE'] ??
-              Platform.environment['PROCESSOR_ARCHITEW6432'] ??
-              '')
-          .toLowerCase();
+      final arch =
+          (Platform.environment['PROCESSOR_ARCHITECTURE'] ??
+                  Platform.environment['PROCESSOR_ARCHITEW6432'] ??
+                  '')
+              .toLowerCase();
       if (arch.contains('arm64')) return 'arm64';
       return 'amd64';
     }
@@ -506,7 +546,7 @@ class DesktopRunner {
     if (platform.isLinux) {
       final result = await Process.run('sh', [
         '-c',
-        "ip route show default 0.0.0.0/0 | awk '{print \$5; exit}'"
+        "ip route show default 0.0.0.0/0 | awk '{print \$5; exit}'",
       ]);
       final iface = result.stdout.toString().trim();
       return iface.isEmpty ? null : iface;
@@ -515,7 +555,7 @@ class DesktopRunner {
     if (platform.isMacos) {
       final result = await Process.run('sh', [
         '-c',
-        "route get default | awk '/interface:/{print \$2; exit}'"
+        "route get default | awk '/interface:/{print \$2; exit}'",
       ]);
       final iface = result.stdout.toString().trim();
       return iface.isEmpty ? null : iface;
@@ -524,7 +564,7 @@ class DesktopRunner {
     if (platform.isWindows) {
       final result = await Process.run('powershell', [
         '-Command',
-        "(Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Sort-Object RouteMetric | Select-Object -First 1).InterfaceAlias"
+        "(Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Sort-Object RouteMetric | Select-Object -First 1).InterfaceAlias",
       ]);
       final iface = result.stdout.toString().trim();
       return iface.isEmpty ? null : iface;
