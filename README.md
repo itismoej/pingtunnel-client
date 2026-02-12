@@ -28,6 +28,13 @@ sudo apt -f install
 sudo rpm -i pingtunnel-client-*.rpm
 ```
 
+## Versioning
+
+- Keep `app/pubspec.yaml` `version:` as the human release version and bump it manually (for example `0.6.0+1`) in a release commit.
+- CI sets `--build-number` from `GITHUB_RUN_NUMBER` for monotonic Android `versionCode`.
+- On tag builds, CI sets `--build-name` from the tag (`vX.Y.Z` or `X.Y.Z`).
+- Release tags should follow semantic versioning so app version metadata stays predictable.
+
 ## Requirements (Linux)
 
 - `policykit-1` is required for VPN mode (route/TUN changes).

@@ -10,6 +10,15 @@ import 'package:window_manager/window_manager.dart';
 import 'src/config.dart';
 import 'src/tunnel_controller.dart';
 
+const _buildVersionName = String.fromEnvironment('APP_VERSION', defaultValue: 'dev');
+const _buildVersionCode = String.fromEnvironment('APP_BUILD', defaultValue: '0');
+const _buildGitSha = String.fromEnvironment('GIT_SHA', defaultValue: 'local');
+
+String _shortGitSha(String value) => value.length <= 8 ? value : value.substring(0, 8);
+
+String get _buildLabel =>
+    'v$_buildVersionName+$_buildVersionCode (${_shortGitSha(_buildGitSha)})';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isLinux) {
@@ -908,6 +917,11 @@ class _ConnectionListPageState extends State<ConnectionListPage>
                                     .withValues(alpha: 0.6)),
                       ),
                     ],
+                    const SizedBox(height: 6),
+                    const Align(
+                      alignment: Alignment.centerRight,
+                      child: _BuildInfoText(),
+                    ),
                   ],
                 ),
               ),
@@ -1602,35 +1616,60 @@ class _ConnectionDetailPageState extends State<ConnectionDetailPage> {
               color: Theme.of(context).colorScheme.surface,
               border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
             ),
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  flex: 3,
-                  child: FilledButton.tonalIcon(
-                    onPressed: _testing ? null : _testConnection,
-                    icon: const Icon(Icons.network_check),
-                    label: Text(_testing ? 'Testing...' : 'Test'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 5,
-                  child: SizedBox(
-                    height: 52,
-                    child: FilledButton.icon(
-                      onPressed: status == TunnelStatus.connecting
-                          ? null
-                          : (_isActive ? _disconnect : _connect),
-                      icon: Icon(_isActive ? Icons.stop : Icons.play_arrow),
-                      label: Text(_isActive ? 'Disconnect' : 'Connect'),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: FilledButton.tonalIcon(
+                        onPressed: _testing ? null : _testConnection,
+                        icon: const Icon(Icons.network_check),
+                        label: Text(_testing ? 'Testing...' : 'Test'),
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 5,
+                      child: SizedBox(
+                        height: 52,
+                        child: FilledButton.icon(
+                          onPressed: status == TunnelStatus.connecting
+                              ? null
+                              : (_isActive ? _disconnect : _connect),
+                          icon: Icon(_isActive ? Icons.stop : Icons.play_arrow),
+                          label: Text(_isActive ? 'Disconnect' : 'Connect'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                const Align(
+                  alignment: Alignment.centerRight,
+                  child: _BuildInfoText(),
                 ),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _BuildInfoText extends StatelessWidget {
+  const _BuildInfoText();
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      _buildLabel,
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            fontSize: 10,
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
+          ),
     );
   }
 }

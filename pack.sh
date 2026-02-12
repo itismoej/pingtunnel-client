@@ -15,6 +15,9 @@ Target selection is controlled with environment variables:
   BUILD_ANDROID   1|0|auto   Build Android APKs
   BUILD_LINUX     1|0|auto   Build Linux bundle and .deb/.rpm
   BUILD_WINDOWS   1|0|auto   Build Windows release bundle
+  FLUTTER_BUILD_NAME          Override Flutter --build-name (e.g. 0.6.0)
+  FLUTTER_BUILD_NUMBER        Override Flutter --build-number (e.g. 123)
+  BUILD_GIT_SHA               Override embedded git commit hash
 
 Defaults:
   BUILD_ANDROID=auto -> enabled
@@ -85,15 +88,41 @@ VERSION="$(awk -F': ' '/^version:/ {print $2; exit}' "${APP_DIR}/pubspec.yaml" |
 if [[ -z "${VERSION}" ]]; then
   VERSION="0.1.0+1"
 fi
+PUBSPEC_BUILD_NAME="${VERSION%%+*}"
+PUBSPEC_BUILD_NUMBER="1"
+if [[ "${VERSION}" == *"+"* ]]; then
+  PUBSPEC_BUILD_NUMBER="${VERSION##*+}"
+fi
+
+BUILD_NAME="${FLUTTER_BUILD_NAME:-${PUBSPEC_BUILD_NAME}}"
+BUILD_NUMBER="${FLUTTER_BUILD_NUMBER:-${PUBSPEC_BUILD_NUMBER}}"
+VERSION="${BUILD_NAME}+${BUILD_NUMBER}"
 VERSION_TAG="${VERSION//+/-}"
+BUILD_GIT_SHA="${BUILD_GIT_SHA:-$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)}"
+
+FLUTTER_BUILD_ARGS=()
+if [[ -n "${FLUTTER_BUILD_NAME:-}" ]]; then
+  FLUTTER_BUILD_ARGS+=(--build-name "${FLUTTER_BUILD_NAME}")
+fi
+if [[ -n "${FLUTTER_BUILD_NUMBER:-}" ]]; then
+  FLUTTER_BUILD_ARGS+=(--build-number "${FLUTTER_BUILD_NUMBER}")
+fi
+DART_DEFINE_ARGS=(
+  "--dart-define=APP_VERSION=${BUILD_NAME}"
+  "--dart-define=APP_BUILD=${BUILD_NUMBER}"
+  "--dart-define=GIT_SHA=${BUILD_GIT_SHA}"
+)
+
+echo "Resolved app version: ${VERSION}"
+echo "Resolved git commit: ${BUILD_GIT_SHA}"
 
 echo "Bootstrapping Flutter app..."
 "${ROOT_DIR}/scripts/bootstrap_flutter.sh"
 
 if [[ "${BUILD_ANDROID}" == "1" ]]; then
   echo "Building Android APKs (release)..."
-  (cd "${APP_DIR}" && flutter build apk --release)
-  (cd "${APP_DIR}" && flutter build apk --release --split-per-abi)
+  (cd "${APP_DIR}" && flutter build apk --release "${FLUTTER_BUILD_ARGS[@]}" "${DART_DEFINE_ARGS[@]}")
+  (cd "${APP_DIR}" && flutter build apk --release --split-per-abi "${FLUTTER_BUILD_ARGS[@]}" "${DART_DEFINE_ARGS[@]}")
 fi
 
 mkdir -p "${DIST_DIR}"
@@ -130,7 +159,7 @@ if [[ "${BUILD_LINUX}" == "1" ]]; then
   fi
 
   echo "Building Linux bundle (release)..."
-  (cd "${APP_DIR}" && flutter build linux --release)
+  (cd "${APP_DIR}" && flutter build linux --release "${FLUTTER_BUILD_ARGS[@]}" "${DART_DEFINE_ARGS[@]}")
 
   echo "Building Debian package(s)..."
   BUILT_DEB=0
@@ -180,7 +209,7 @@ if [[ "${BUILD_WINDOWS}" == "1" ]]; then
   fi
 
   echo "Building Windows bundle (release)..."
-  (cd "${APP_DIR}" && flutter build windows --release)
+  (cd "${APP_DIR}" && flutter build windows --release "${FLUTTER_BUILD_ARGS[@]}" "${DART_DEFINE_ARGS[@]}")
 
   WINDOWS_BUILD_COUNT=0
   for win_arch in x64 arm64; do

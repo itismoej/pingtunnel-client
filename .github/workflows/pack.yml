@@ -14,6 +14,7 @@ on:
 jobs:
   build:
     name: build-${{ matrix.target }}
+    environment: android keys
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -71,15 +72,63 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Resolve CI build version
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CI_BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "${GITHUB_ENV}"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            build_name="${GITHUB_REF_NAME#v}"
+            if [[ ! "${build_name}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Tag '${GITHUB_REF_NAME}' is invalid. Use 'vX.Y.Z' or 'X.Y.Z'." >&2
+              exit 1
+            fi
+            echo "CI_BUILD_NAME=${build_name}" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Prepare Android signing
+        if: matrix.target == 'android'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          test -n "${ANDROID_KEYSTORE_B64}"
+          test -n "${ANDROID_KEYSTORE_PASSWORD}"
+          test -n "${ANDROID_KEY_ALIAS}"
+          test -n "${ANDROID_KEY_PASSWORD}"
+
+          printf '%s' "${ANDROID_KEYSTORE_B64}" | base64 --decode > app/android/release-keystore.jks
+
+          {
+            printf 'storePassword=%s\n' "${ANDROID_KEYSTORE_PASSWORD}"
+            printf 'keyPassword=%s\n' "${ANDROID_KEY_PASSWORD}"
+            printf 'keyAlias=%s\n' "${ANDROID_KEY_ALIAS}"
+            printf 'storeFile=%s\n' "release-keystore.jks"
+          } > app/android/key.properties
+
       - name: Build artifacts via pack.sh
         shell: bash
         env:
           BUILD_ANDROID: ${{ matrix.build_android }}
           BUILD_LINUX: ${{ matrix.build_linux }}
           BUILD_WINDOWS: ${{ matrix.build_windows }}
+          FLUTTER_BUILD_NAME: ${{ env.CI_BUILD_NAME }}
+          FLUTTER_BUILD_NUMBER: ${{ env.CI_BUILD_NUMBER }}
         run: |
           chmod +x pack.sh
           ./pack.sh
+
+      - name: Clean Android signing files
+        if: always() && matrix.target == 'android'
+        shell: bash
+        run: |
+          rm -f app/android/key.properties app/android/release-keystore.jks
 
       - name: Zip Windows bundles for release assets
         if: matrix.target == 'windows'
