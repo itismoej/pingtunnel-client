@@ -30,7 +30,13 @@ source "${STATE_FILE}"
 RESOLV_MODE="${RESOLV_MODE:-}"
 if [[ "${RESOLV_MODE}" == "resolved" ]]; then
   if command -v resolvectl >/dev/null 2>&1; then
-    resolvectl revert "${IFACE}" || true
+    RESOLV_LINK="${RESOLV_LINK:-${TUN_DEV:-}}"
+    if [[ -n "${RESOLV_LINK}" ]]; then
+      resolvectl revert "${RESOLV_LINK}" || true
+    fi
+    if [[ -n "${IFACE:-}" && "${IFACE}" != "${RESOLV_LINK}" ]]; then
+      resolvectl revert "${IFACE}" || true
+    fi
   fi
 elif [[ "${RESOLV_MODE}" == "resolvconf" ]]; then
   if [[ -f "${RESOLV_BACKUP}" ]]; then
