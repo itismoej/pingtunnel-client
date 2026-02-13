@@ -14,19 +14,17 @@ on:
 jobs:
   build:
     name: build-${{ matrix.target }}
-    environment: android keys
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: android
+          - target: android-ci
             os: ubuntu-latest
             build_android: "1"
             build_linux: "0"
             build_windows: "0"
-            artifact_paths: |
-              dist/*.apk
+            artifact_paths: ""
           - target: linux
             os: ubuntu-latest
             build_android: "0"
@@ -47,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Java (Android)
-        if: matrix.target == 'android'
+        if: matrix.target == 'android-ci'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -87,8 +85,83 @@ jobs:
             echo "CI_BUILD_NAME=${build_name}" >> "${GITHUB_ENV}"
           fi
 
+      - name: Build artifacts via pack.sh
+        if: matrix.target != 'android-ci'
+        shell: bash
+        env:
+          BUILD_ANDROID: ${{ matrix.build_android }}
+          BUILD_LINUX: ${{ matrix.build_linux }}
+          BUILD_WINDOWS: ${{ matrix.build_windows }}
+          FLUTTER_BUILD_NAME: ${{ env.CI_BUILD_NAME }}
+          FLUTTER_BUILD_NUMBER: ${{ env.CI_BUILD_NUMBER }}
+        run: |
+          chmod +x pack.sh
+          ./pack.sh
+
+      - name: Build Android CI (debug, unsigned)
+        if: matrix.target == 'android-ci'
+        shell: bash
+        run: |
+          chmod +x scripts/bootstrap_flutter.sh
+          ./scripts/bootstrap_flutter.sh
+          (cd app && flutter build apk --debug)
+
+      - name: Zip Windows bundles for release assets
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -Directory -Filter "pingtunnel-client-*-windows-*" | ForEach-Object {
+            $zipPath = "$($_.FullName).zip"
+            if (Test-Path $zipPath) {
+              Remove-Item $zipPath -Force
+            }
+            Compress-Archive -Path "$($_.FullName)\*" -DestinationPath $zipPath
+          }
+
+      - name: Upload artifacts
+        if: matrix.target != 'android-ci'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pingtunnel-${{ matrix.target }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+
+  build-android-release:
+    name: build-android-release
+    if: startsWith(github.ref, 'refs/tags/')
+    environment: android keys
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java (Android)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve CI build version
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CI_BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "${GITHUB_ENV}"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            build_name="${GITHUB_REF_NAME#v}"
+            if [[ ! "${build_name}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Tag '${GITHUB_REF_NAME}' is invalid. Use 'vX.Y.Z' or 'X.Y.Z'." >&2
+              exit 1
+            fi
+            echo "CI_BUILD_NAME=${build_name}" >> "${GITHUB_ENV}"
+          fi
+
       - name: Prepare Android signing
-        if: matrix.target == 'android'
         shell: bash
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -112,12 +185,12 @@ jobs:
             printf 'storeFile=%s\n' "release-keystore.jks"
           } > app/android/key.properties
 
-      - name: Build artifacts via pack.sh
+      - name: Build signed Android artifacts via pack.sh
         shell: bash
         env:
-          BUILD_ANDROID: ${{ matrix.build_android }}
-          BUILD_LINUX: ${{ matrix.build_linux }}
-          BUILD_WINDOWS: ${{ matrix.build_windows }}
+          BUILD_ANDROID: "1"
+          BUILD_LINUX: "0"
+          BUILD_WINDOWS: "0"
           FLUTTER_BUILD_NAME: ${{ env.CI_BUILD_NAME }}
           FLUTTER_BUILD_NUMBER: ${{ env.CI_BUILD_NUMBER }}
         run: |
@@ -125,34 +198,22 @@ jobs:
           ./pack.sh
 
       - name: Clean Android signing files
-        if: always() && matrix.target == 'android'
+        if: always()
         shell: bash
         run: |
           rm -f app/android/key.properties app/android/release-keystore.jks
 
-      - name: Zip Windows bundles for release assets
-        if: matrix.target == 'windows'
-        shell: pwsh
-        run: |
-          Get-ChildItem dist -Directory -Filter "pingtunnel-client-*-windows-*" | ForEach-Object {
-            $zipPath = "$($_.FullName).zip"
-            if (Test-Path $zipPath) {
-              Remove-Item $zipPath -Force
-            }
-            Compress-Archive -Path "$($_.FullName)\*" -DestinationPath $zipPath
-          }
-
-      - name: Upload artifacts
+      - name: Upload Android release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: pingtunnel-${{ matrix.target }}
-          path: ${{ matrix.artifact_paths }}
+          name: pingtunnel-android
+          path: dist/*.apk
           if-no-files-found: error
 
   release:
     name: release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: [build, build-android-release]
     runs-on: ubuntu-latest
     permissions:
       contents: write
